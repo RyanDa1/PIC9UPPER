@@ -3,7 +3,7 @@
  * LOBBY → DEAL → PLAY → REVEAL → VOTE → RESULT
  */
 
-import { Phase, createSession, generateId } from "./session.js";
+import { Phase, createSession, generateId, MIN_PLAYERS, MAX_PLAYERS } from "./session.js";
 
 const SAMPLE_WORDS = [
   { correct: "Ocean", wrong: "Desert" },
@@ -32,25 +32,30 @@ export class GameManager {
     return this.session;
   }
 
-  createSession(playerId) {
+  createSession(playerId, playerName) {
     this.session = createSession();
     if (playerId) {
+      const playerNames = { [playerId]: (playerName || "").trim() || `Player ${playerId.slice(0, 4)}` };
       this.session = {
         ...this.session,
         players: [playerId],
+        playerNames,
       };
     }
     this.notify();
   }
 
-  joinSession(sessionId, playerId) {
+  joinSession(sessionId, playerId, playerName) {
     if (!this.session || this.session.id !== sessionId) return false;
     if (this.session.phase !== Phase.LOBBY) return false;
+    if (this.session.players.length >= MAX_PLAYERS) return false;
     if (this.session.players.includes(playerId)) return true;
 
+    const playerNames = { ...(this.session.playerNames || {}), [playerId]: (playerName || "").trim() || `Player ${playerId.slice(0, 4)}` };
     this.session = {
       ...this.session,
       players: [...this.session.players, playerId],
+      playerNames,
     };
     this.notify();
     return true;
@@ -60,9 +65,12 @@ export class GameManager {
     if (!this.session) return;
     if (this.session.phase !== Phase.LOBBY) return;
 
+    const playerNames = { ...(this.session.playerNames || {}) };
+    delete playerNames[playerId];
     this.session = {
       ...this.session,
       players: this.session.players.filter((p) => p !== playerId),
+      playerNames,
       assignments: { ...this.session.assignments },
     };
     delete this.session.assignments[playerId];
@@ -71,7 +79,8 @@ export class GameManager {
 
   startGame(playerId) {
     if (!this.session || this.session.phase !== Phase.LOBBY) return false;
-    if (this.session.players.length < 2) return false;
+    const count = this.session.players.length;
+    if (count < MIN_PLAYERS || count > MAX_PLAYERS) return false;
 
     const words =
       SAMPLE_WORDS[Math.floor(Math.random() * SAMPLE_WORDS.length)];
@@ -193,6 +202,7 @@ export class GameManager {
     this.session = {
       ...createSession(this.session.id),
       players: [...this.session.players],
+      playerNames: { ...(this.session.playerNames || {}) },
     };
     this.notify();
   }
@@ -200,10 +210,14 @@ export class GameManager {
   /** Dev: add a bot player so single tab can test full flow */
   addBot() {
     if (!this.session || this.session.phase !== Phase.LOBBY) return false;
+    if (this.session.players.length >= MAX_PLAYERS) return false;
     const botId = "bot-" + generateId().slice(0, 6);
+    const names = ["Alex", "Sam", "Jordan", "Casey", "Riley", "Quinn", "Avery", "Morgan"];
+    const playerNames = { ...(this.session.playerNames || {}), [botId]: names[this.session.players.length % names.length] };
     this.session = {
       ...this.session,
       players: [...this.session.players, botId],
+      playerNames,
     };
     this.notify();
     return true;

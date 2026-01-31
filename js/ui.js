@@ -3,21 +3,15 @@
  * No separate frontend state machine.
  */
 
-import { Phase, getPlayerAssignment } from "./session.js";
+import { Phase, getPlayerAssignment, getPlayerName, MIN_PLAYERS, MAX_PLAYERS } from "./session.js";
 
-export function render(session, playerId, game, onAction) {
+export function render(session, playerId, game, onAction, helpers = {}) {
   const root = document.getElementById("app");
   if (!root) return;
 
   if (!session) {
-    root.innerHTML = `
-      <div class="screen lobby">
-        <h1>PIC9UPPER</h1>
-        <p>Gathering game helper</p>
-        <button class="btn primary" data-action="create">Create session</button>
-      </div>
-    `;
-    attachListeners(root, game, null, onAction);
+    root.innerHTML = renderHome(helpers);
+    attachListeners(root, game, null, onAction, helpers);
     return;
   }
 
@@ -26,7 +20,7 @@ export function render(session, playerId, game, onAction) {
 
   switch (phase) {
     case Phase.LOBBY:
-      root.innerHTML = renderLobby(session, playerId);
+      root.innerHTML = renderLobby(session, playerId, helpers);
       break;
     case Phase.DEAL:
       root.innerHTML = renderDeal(session, playerId, assignment);
@@ -47,39 +41,110 @@ export function render(session, playerId, game, onAction) {
       root.innerHTML = `<div class="screen"><p>Unknown phase: ${phase}</p></div>`;
   }
 
-  attachListeners(root, game, playerId, onAction);
+  attachListeners(root, game, playerId, onAction, helpers);
 }
 
-function renderLobby(session, playerId) {
+function renderHome(helpers) {
+  const storedName = helpers.getStoredPlayerName?.() ?? "";
+  const urlSessionId = helpers.urlSessionId ?? "";
+
+  return `
+    <div class="screen lobby home">
+      <h1>PIC9UPPER</h1>
+      <p class="subtitle">Gathering game helper</p>
+
+      <div class="form-group">
+        <label for="player-name">Your name</label>
+        <input type="text" id="player-name" class="input" placeholder="Enter your name" maxlength="20" value="${escapeHtml(storedName)}" />
+      </div>
+
+      <div class="form-row">
+        <button class="btn primary" data-action="create">Create room</button>
+      </div>
+
+      <div class="divider">
+        <span>or</span>
+      </div>
+
+      <div class="form-group">
+        <label for="room-id">Room ID</label>
+        <input type="text" id="room-id" class="input input-room" placeholder="Enter room ID to join" value="${escapeHtml(urlSessionId)}" />
+      </div>
+      <button class="btn secondary" data-action="join-by-id">Join room</button>
+    </div>
+  `;
+}
+
+function renderLobby(session, playerId, helpers) {
   const isInLobby = session.players.includes(playerId);
-  const canStart = session.players.length >= 2 && session.players[0] === playerId;
+  const isHost = session.players[0] === playerId;
+  const count = session.players.length;
+  const canStart = isHost && count >= MIN_PLAYERS && count <= MAX_PLAYERS;
+  const joinUrl = helpers.getJoinUrl?.(session.id) ?? "";
+  const storedName = helpers.getStoredPlayerName?.() ?? "";
 
   if (!isInLobby) {
     return `
-      <div class="screen lobby">
-        <h1>Join session</h1>
-        <p class="session-id">${session.id}</p>
+      <div class="screen lobby join">
+        <h1>Join room</h1>
+        <p class="room-label">Room ID</p>
+        <p class="room-id">${escapeHtml(session.id)}</p>
+        <div class="form-group">
+          <label for="join-name">Your name</label>
+          <input type="text" id="join-name" class="input" placeholder="Enter your name" maxlength="20" value="${escapeHtml(storedName)}" />
+        </div>
         <button class="btn primary" data-action="join">Join</button>
+        ${count >= MAX_PLAYERS ? '<p class="hint error">Room is full.</p>' : ""}
       </div>
     `;
   }
 
+  const playerCountHint = count < MIN_PLAYERS
+    ? `Need ${MIN_PLAYERS - count} more to start (${MIN_PLAYERS}–${MAX_PLAYERS} players)`
+    : count > MAX_PLAYERS
+      ? `Too many players (max ${MAX_PLAYERS})`
+      : `Ready to start (${count} players)`;
+
   return `
     <div class="screen lobby">
       <h1>LOBBY</h1>
-      <p class="session-id">Session: ${session.id}</p>
+      ${isHost ? `
+        <div class="room-share">
+          <p class="room-label">Room ID</p>
+          <div class="room-id-row">
+            <code class="room-id">${escapeHtml(session.id)}</code>
+            <button class="btn icon" data-action="copy-id" title="Copy room ID">📋</button>
+          </div>
+          <p class="room-label">Share link</p>
+          <div class="room-id-row">
+            <input type="text" class="input input-share" readonly value="${escapeHtml(joinUrl)}" />
+            <button class="btn icon" data-action="copy-link" title="Copy link">📋</button>
+          </div>
+        </div>
+      ` : ""}
+
       <div class="players">
         ${session.players.map((p) => `
           <div class="player-tag ${p === playerId ? "you" : ""}">
-            ${p === playerId ? "You" : p.slice(0, 6)}
+            ${escapeHtml(getPlayerName(session, p))}
+            ${p === playerId ? " (you)" : ""}
           </div>
         `).join("")}
       </div>
-      <p class="hint">${session.players.length} player(s). Need 2+ to start.</p>
+
+      <p class="hint">${playerCountHint}</p>
+
       ${canStart ? '<button class="btn primary" data-action="start">Start game</button>' : ""}
-      <button class="btn secondary dev-btn" data-action="add-bot">+ Add test player</button>
+      ${isHost && count < MAX_PLAYERS ? '<button class="btn secondary dev-btn" data-action="add-bot">+ Add test player</button>' : ""}
     </div>
   `;
+}
+
+function escapeHtml(s) {
+  if (s == null) return "";
+  const div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
 }
 
 function renderDeal(session, playerId, assignment) {
@@ -145,7 +210,7 @@ function renderVote(session, playerId) {
       <div class="vote-section">
         <h3>Who has the correct word?</h3>
         ${!hasDealerGuessed ? dealerCandidates.map((p) => `
-          <button class="btn vote-btn" data-action="dealer-guess" data-target="${p}">${p.slice(0, 6)}</button>
+          <button class="btn vote-btn" data-action="dealer-guess" data-target="${p}">${escapeHtml(getPlayerName(session, p))}</button>
         `).join("") : "<p>Guessed.</p>"}
       </div>
     `;
@@ -157,7 +222,7 @@ function renderVote(session, playerId) {
       <p>Vote for the player you suspect has the correct word.</p>
       <div class="vote-section">
         ${!hasVoted && candidates.length > 0 ? candidates.map((p) => `
-          <button class="btn vote-btn" data-action="vote" data-target="${p}">${p.slice(0, 6)}</button>
+          <button class="btn vote-btn" data-action="vote" data-target="${p}">${escapeHtml(getPlayerName(session, p))}</button>
         `).join("") : hasVoted ? "<p>Vote submitted. Waiting for others.</p>" : "<p>No other players to vote for.</p>"}
       </div>
       ${dealerSection}
@@ -169,10 +234,13 @@ function renderVote(session, playerId) {
 function renderResult(session, playerId) {
   const assignments = session.players.map((p) => ({
     id: p,
+    name: getPlayerName(session, p),
     word: session.assignments[p] ?? "(blank)",
     votes: Object.entries(session.votes).filter(([, t]) => t === p).length,
     isYou: p === playerId,
   }));
+
+  const dealerGuessName = session.dealerGuess ? getPlayerName(session, session.dealerGuess) : "—";
 
   return `
     <div class="screen result">
@@ -180,32 +248,47 @@ function renderResult(session, playerId) {
       <div class="result-grid">
         ${assignments.map((a) => `
           <div class="result-card ${a.isYou ? "you" : ""}">
-            <span class="player">${a.isYou ? "You" : a.id.slice(0, 6)}</span>
-            <span class="word">${a.word}</span>
+            <span class="player">${escapeHtml(a.isYou ? "You" : a.name)}</span>
+            <span class="word">${escapeHtml(a.word)}</span>
             <span class="votes">${a.votes} vote(s)</span>
           </div>
         `).join("")}
       </div>
-      <p class="dealer-guess">Dealer guessed: ${session.players.find((p) => p === session.dealerGuess)?.slice(0, 6) ?? "—"}</p>
+      <p class="dealer-guess">Dealer guessed: ${escapeHtml(dealerGuessName)}</p>
       <button class="btn primary" data-action="reset">New round</button>
     </div>
   `;
 }
 
-function attachListeners(root, game, playerId, onAction) {
+function attachListeners(root, game, playerId, onAction, helpers = {}) {
   root.querySelectorAll("[data-action]").forEach((el) => {
     el.addEventListener("click", (e) => {
       const action = el.dataset.action;
       const target = el.dataset.target;
 
       switch (action) {
-        case "create":
-          game.createSession(playerId);
+        case "create": {
+          const nameInput = document.getElementById("player-name");
+          const name = nameInput?.value?.trim() ?? "";
+          helpers.setStoredPlayerName?.(name);
+          game.createSession(playerId, name);
           onAction?.({ type: "create", session: game.getSession() });
           break;
-        case "join":
-          onAction?.({ type: "join", sessionId: game.getSession()?.id, playerId });
+        }
+        case "join-by-id": {
+          const roomInput = document.getElementById("room-id");
+          const roomId = roomInput?.value?.trim() ?? "";
+          if (roomId) helpers.requestSession?.(roomId);
           break;
+        }
+        case "join": {
+          const nameInput = document.getElementById("join-name");
+          const name = nameInput?.value?.trim() ?? "";
+          helpers.setStoredPlayerName?.(name);
+          const session = game.getSession();
+          if (session) onAction?.({ type: "join", sessionId: session.id, playerId, playerName: name });
+          break;
+        }
         case "start":
           game.startGame(playerId);
           onAction?.({ type: "start" });
@@ -238,6 +321,17 @@ function attachListeners(root, game, playerId, onAction) {
           game.addBot();
           onAction?.({ type: "addBot" });
           break;
+        case "copy-id": {
+          const session = game.getSession();
+          if (session) navigator.clipboard?.writeText(session.id);
+          break;
+        }
+        case "copy-link": {
+          const session = game.getSession();
+          const url = session ? helpers.getJoinUrl?.(session.id) : "";
+          if (url) navigator.clipboard?.writeText(url);
+          break;
+        }
         case "dev-ack":
           game.devAllAcknowledged();
           break;

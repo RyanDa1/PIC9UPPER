@@ -19,8 +19,8 @@ export function createSync(gameManager) {
     }
   };
 
-  const requestState = () => {
-    channel.postMessage({ type: "NEED_STATE" });
+  const requestState = (sessionId) => {
+    channel.postMessage({ type: "NEED_STATE", sessionId });
   };
 
   channel.onmessage = (e) => {
@@ -28,16 +28,20 @@ export function createSync(gameManager) {
       gameManager.setSession(e.data.session);
     }
     if (e.data?.type === "NEED_STATE") {
-      broadcast(); // Respond with our state if we have one
+      const session = gameManager.getSession();
+      if (session) {
+        const wanted = e.data?.sessionId;
+        if (!wanted || session.id === wanted) channel.postMessage({ type: "STATE", session });
+      }
     }
   };
 
   return {
     broadcast,
     requestState,
-    init: () => {
+    init: (sessionId) => {
       gameManager.subscribe(broadcast);
-      requestState(); // Ask for state on load (another tab may have session)
+      requestState(sessionId); // Ask for state (optionally for specific room)
     },
   };
 }

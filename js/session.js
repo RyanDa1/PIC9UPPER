@@ -26,18 +26,26 @@ export function createSession(id = generateId()) {
     id,
     phase: Phase.LOBBY,
     players: [],
+    playerNames: {}, // Map<PlayerID, string> - display names
     dealerId: null,
     words: { correct: "", wrong: "" },
     assignments: {}, // Map<PlayerID, string | null>
-    ready: {}, // Set as object: { [playerId]: true }
-    votes: {}, // Map<PlayerID, PlayerID> - who voted for whom
+    ready: {},
+    votes: {},
     dealerGuess: null,
   };
+}
+
+export function getPlayerName(session, playerId) {
+  return session.playerNames?.[playerId] ?? playerId?.slice(0, 8) ?? "?";
 }
 
 export function generateId() {
   return Math.random().toString(36).slice(2, 11);
 }
+
+export const MIN_PLAYERS = 4;
+export const MAX_PLAYERS = 12;
 
 export function getPlayerAssignment(session, playerId) {
   return session.assignments[playerId] ?? null;

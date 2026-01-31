@@ -39,10 +39,115 @@ main {
   margin: 0;
 }
 
-.screen .session-id {
-  font-size: 0.8rem;
+.screen .session-id,
+.screen .room-id {
+  font-size: 0.9rem;
   font-family: monospace;
+  color: #94a3b8;
+}
+
+.form-group {
+  width: 100%;
+  text-align: left;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.85rem;
+  color: #94a3b8;
+  margin-bottom: 0.35rem;
+}
+
+.input {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  font-size: 1rem;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.input:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.input-room,
+.input-share {
+  font-family: monospace;
+  font-size: 0.9rem;
+}
+
+.form-row {
+  width: 100%;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  margin: 0.5rem 0;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #334155;
+}
+
+.divider span {
+  font-size: 0.85rem;
   color: #64748b;
+}
+
+.subtitle {
+  color: #94a3b8;
+  font-size: 0.95rem;
+  margin: 0 0 1rem 0;
+}
+
+.room-share {
+  width: 100%;
+  text-align: left;
+  margin-bottom: 0.5rem;
+}
+
+.room-label {
+  font-size: 0.8rem;
+  color: #64748b;
+  margin: 0.25rem 0;
+}
+
+.room-id-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.room-id-row .room-id {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
+  background: #1e293b;
+  border-radius: 6px;
+}
+
+.room-id-row .input-share {
+  flex: 1;
+}
+
+.btn.icon {
+  padding: 0.5rem 0.75rem;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.hint.error {
+  color: #f87171;
 }
 
 .players {
