@@ -16,13 +16,137 @@ body {
 main {
   text-align: center;
   padding: 2rem;
+  max-width: 480px;
 }
 
-h1 {
-  font-size: 2.5rem;
-  margin-bottom: 0.5rem;
+.screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
 }
 
-p {
+.screen h1 {
+  font-size: 1.75rem;
+  margin: 0 0 0.25rem 0;
+  color: #f8fafc;
+}
+
+.screen .hint,
+.screen .status {
+  font-size: 0.9rem;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.screen .session-id {
+  font-size: 0.8rem;
+  font-family: monospace;
+  color: #64748b;
+}
+
+.players {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  margin: 0.5rem 0;
+}
+
+.player-tag {
+  padding: 0.35rem 0.75rem;
+  background: #1e293b;
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+.player-tag.you {
+  background: #334155;
+  border: 1px solid #475569;
+}
+
+.btn {
+  padding: 0.6rem 1.25rem;
+  font-size: 1rem;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn.primary {
+  background: #3b82f6;
+  color: white;
+}
+
+.btn.primary:hover {
+  background: #2563eb;
+}
+
+.btn.secondary {
+  background: #334155;
+  color: #cbd5e1;
+}
+
+.btn.secondary:hover {
+  background: #475569;
+}
+
+.dev-btn {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.75rem;
+  opacity: 0.85;
+}
+
+.vote-btn {
+  margin: 0.25rem;
+}
+
+.your-word,
+.correct-word {
+  font-size: 1.1rem;
+  margin: 0.5rem 0;
+}
+
+.vote-section,
+.result-grid {
+  margin: 1rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.result-card {
+  padding: 0.75rem 1rem;
+  background: #1e293b;
+  border-radius: 8px;
+  min-width: 100px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.result-card .player {
+  font-weight: 600;
+}
+
+.result-card .word {
+  font-size: 0.9rem;
+  color: #94a3b8;
+}
+
+.result-card .votes {
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.result-card.you {
+  border: 1px solid #475569;
+}
+
+.dealer-guess {
+  font-size: 0.9rem;
   color: #94a3b8;
 }

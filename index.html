@@ -7,9 +7,19 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main>
-    <h1>Hello World</h1>
-    <p>PIC9UPPER — your gathering game helper is live.</p>
+  <main id="app">
+    <div class="screen lobby">
+      <h1>PIC9UPPER</h1>
+      <p>Gathering game helper</p>
+      <p class="hint">Loading…</p>
+    </div>
   </main>
+  <script type="module" src="js/app.js"></script>
+  <script>
+    window.addEventListener("error", function(e) {
+      var el = document.getElementById("app");
+      if (el) el.innerHTML = "<div class=\"screen\"><h1>Error</h1><p>Check the console (F12) for details.</p><pre>" + (e.message || "Unknown error") + "</pre></div>";
+    });
+  </script>
 </body>
 </html>

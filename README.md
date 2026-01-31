@@ -1,6 +1,17 @@
 # PIC9UPPER — Gathering Game Helper
 
-A simple web helper for a physical gathering game. Deployed on Cloudflare Pages.
+A simple web helper for a physical Dixit-like gathering game. Deployed on Cloudflare Pages.
+
+## Local development
+
+```bash
+npm run dev
+```
+
+Then open http://localhost:3000
+
+- **Single-tab test:** Create session → "+ Add test player" → Start game → use "Dev:" buttons to advance phases
+- **Multi-tab test:** Open multiple tabs at the same URL; one tab creates, others join via sync
 
 ## Deploy to Cloudflare Pages
 
