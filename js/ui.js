@@ -17,30 +17,33 @@ export function render(session, playerId, game, onAction, helpers = {}) {
 
   const assignment = getPlayerAssignment(session, playerId);
   const phase = session.phase;
+  const homeBtn = '<button class="btn-home" data-action="go-home" title="Home">\u2302</button>';
 
+  let screenHtml;
   switch (phase) {
     case Phase.LOBBY:
-      root.innerHTML = renderLobby(session, playerId, helpers);
+      screenHtml = renderLobby(session, playerId, helpers);
       break;
     case Phase.DEAL:
-      root.innerHTML = renderDeal(session, playerId, assignment);
+      screenHtml = renderDeal(session, playerId, assignment);
       break;
     case Phase.PLAY:
-      root.innerHTML = renderPlay(session, playerId);
+      screenHtml = renderPlay(session, playerId);
       break;
     case Phase.REVEAL:
-      root.innerHTML = renderReveal(session);
+      screenHtml = renderReveal(session);
       break;
     case Phase.VOTE:
-      root.innerHTML = renderVote(session, playerId);
+      screenHtml = renderVote(session, playerId);
       break;
     case Phase.RESULT:
-      root.innerHTML = renderResult(session, playerId);
+      screenHtml = renderResult(session, playerId);
       break;
     default:
-      root.innerHTML = `<div class="screen"><p>Unknown phase: ${phase}</p></div>`;
+      screenHtml = `<div class="screen"><p>Unknown phase: ${phase}</p></div>`;
   }
 
+  root.innerHTML = homeBtn + screenHtml;
   attachListeners(root, game, playerId, onAction, helpers);
 }
 
@@ -267,6 +270,10 @@ function attachListeners(root, game, playerId, onAction, helpers = {}) {
       const target = el.dataset.target;
 
       switch (action) {
+        case "go-home":
+          game.clearSession();
+          onAction?.({ type: "reset" });
+          break;
         case "create": {
           const nameInput = document.getElementById("player-name");
           const name = nameInput?.value?.trim() ?? "";

@@ -207,6 +207,11 @@ export class GameManager {
     this.notify();
   }
 
+  clearSession() {
+    this.session = null;
+    this.notify();
+  }
+
   /** Dev: add a bot player so single tab can test full flow */
   addBot() {
     if (!this.session || this.session.phase !== Phase.LOBBY) return false;

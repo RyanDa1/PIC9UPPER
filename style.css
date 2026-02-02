@@ -14,9 +14,28 @@ body {
 }
 
 main {
+  position: relative;
   text-align: center;
   padding: 2rem;
   max-width: 480px;
+}
+
+.btn-home {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 1.4rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.btn-home:hover {
+  color: #f8fafc;
 }
 
 .screen {

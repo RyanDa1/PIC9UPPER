@@ -47,6 +47,11 @@ function main() {
     }
     if (ev?.type === "reset") {
       sessionStorage.removeItem(SESSION_ID_KEY);
+      const url = new URL(location.href);
+      if (url.searchParams.has("session")) {
+        url.searchParams.delete("session");
+        history.replaceState(null, "", url.pathname);
+      }
     }
   };
 
