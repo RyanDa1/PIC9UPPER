@@ -129,8 +129,7 @@ function renderLobby(session, playerId, helpers) {
       <div class="players">
         ${session.players.map((p) => `
           <div class="player-tag ${p === playerId ? "you" : ""}">
-            ${escapeHtml(getPlayerName(session, p))}
-            ${p === playerId ? " (you)" : ""}
+            ${p === session.players[0] ? '<span class="crown">\uD83D\uDC51</span> ' : ""}${escapeHtml(getPlayerName(session, p))}${p === playerId ? " (you)" : ""}
           </div>
         `).join("")}
       </div>
@@ -213,7 +212,7 @@ function renderVote(session, playerId) {
       <div class="vote-section">
         <h3>Who has the correct word?</h3>
         ${!hasDealerGuessed ? dealerCandidates.map((p) => `
-          <button class="btn vote-btn" data-action="dealer-guess" data-target="${p}">${escapeHtml(getPlayerName(session, p))}</button>
+          <button class="btn vote-btn" data-action="dealer-guess" data-target="${p}">${p === session.players[0] ? "\uD83D\uDC51 " : ""}${escapeHtml(getPlayerName(session, p))}</button>
         `).join("") : "<p>Guessed.</p>"}
       </div>
     `;
@@ -225,7 +224,7 @@ function renderVote(session, playerId) {
       <p>Vote for the player you suspect has the correct word.</p>
       <div class="vote-section">
         ${!hasVoted && candidates.length > 0 ? candidates.map((p) => `
-          <button class="btn vote-btn" data-action="vote" data-target="${p}">${escapeHtml(getPlayerName(session, p))}</button>
+          <button class="btn vote-btn" data-action="vote" data-target="${p}">${p === session.players[0] ? "\uD83D\uDC51 " : ""}${escapeHtml(getPlayerName(session, p))}</button>
         `).join("") : hasVoted ? "<p>Vote submitted. Waiting for others.</p>" : "<p>No other players to vote for.</p>"}
       </div>
       ${dealerSection}
@@ -241,6 +240,7 @@ function renderResult(session, playerId) {
     word: session.assignments[p] ?? "(blank)",
     votes: Object.entries(session.votes).filter(([, t]) => t === p).length,
     isYou: p === playerId,
+    isHost: p === session.players[0],
   }));
 
   const dealerGuessName = session.dealerGuess ? getPlayerName(session, session.dealerGuess) : "—";
@@ -251,7 +251,7 @@ function renderResult(session, playerId) {
       <div class="result-grid">
         ${assignments.map((a) => `
           <div class="result-card ${a.isYou ? "you" : ""}">
-            <span class="player">${escapeHtml(a.isYou ? "You" : a.name)}</span>
+            <span class="player">${a.isHost ? "\uD83D\uDC51 " : ""}${escapeHtml(a.isYou ? "You" : a.name)}</span>
             <span class="word">${escapeHtml(a.word)}</span>
             <span class="votes">${a.votes} vote(s)</span>
           </div>

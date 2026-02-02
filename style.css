@@ -190,6 +190,10 @@ main {
   border: 1px solid #475569;
 }
 
+.crown {
+  font-size: 0.75em;
+}
+
 .btn {
   padding: 0.6rem 1.25rem;
   font-size: 1rem;
