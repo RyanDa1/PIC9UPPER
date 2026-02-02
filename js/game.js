@@ -46,12 +46,16 @@ export class GameManager {
   }
 
   joinSession(sessionId, playerId, playerName) {
-    if (!this.session || this.session.id !== sessionId) return false;
-    if (this.session.phase !== Phase.LOBBY) return false;
-    if (this.session.players.length >= MAX_PLAYERS) return false;
+    if (!this.session || this.session.id !== sessionId) return "invalid";
+    if (this.session.phase !== Phase.LOBBY) return "invalid";
+    if (this.session.players.length >= MAX_PLAYERS) return "full";
     if (this.session.players.includes(playerId)) return true;
 
-    const playerNames = { ...(this.session.playerNames || {}), [playerId]: (playerName || "").trim() || `Player ${playerId.slice(0, 4)}` };
+    const name = (playerName || "").trim() || `Player ${playerId.slice(0, 4)}`;
+    const existingNames = Object.values(this.session.playerNames || {});
+    if (existingNames.some((n) => n.toLowerCase() === name.toLowerCase())) return "duplicate_name";
+
+    const playerNames = { ...(this.session.playerNames || {}), [playerId]: name };
     this.session = {
       ...this.session,
       players: [...this.session.players, playerId],

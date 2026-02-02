@@ -10,8 +10,10 @@ npm run dev
 
 Then open http://localhost:3000
 
-- **Single-tab test:** Create session → "+ Add test player" → Start game → use "Dev:" buttons to advance phases
-- **Multi-tab test:** Open multiple tabs at the same URL; one tab creates, others join via sync
+- **Single-tab test:** Create room → "+ Add test player" → Start game → use "Dev:" buttons to advance phases
+- **Multi-tab test:** Create room in one tab (URL updates to `localhost:3000/{roomID}`), open that URL in other tabs to join
+- **Room URLs:** Creating or joining a room navigates to `/{roomID}`. Sharing the URL lets others join directly.
+- **Presence detection:** In the lobby, players who close their tab are removed instantly. Heartbeat fallback catches crashes (~10s). If the host leaves, the next player becomes host.
 
 ## Deploy to Cloudflare Pages
 

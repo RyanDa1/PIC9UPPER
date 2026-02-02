@@ -12,11 +12,10 @@ const SESSION_ID_KEY = "pic9upper-sessionId";
 const PLAYER_NAME_KEY = "pic9upper-playerName";
 
 function getPlayerId() {
-  let id = sessionStorage.getItem(PLAYER_ID_KEY);
-  if (!id) {
-    id = generateId();
-    sessionStorage.setItem(PLAYER_ID_KEY, id);
-  }
+  // Always generate a fresh ID on page load so that refresh = disconnect.
+  // The old player ID gets removed via beforeunload LEAVE message.
+  const id = generateId();
+  sessionStorage.setItem(PLAYER_ID_KEY, id);
   return id;
 }
 
@@ -28,8 +27,13 @@ function setStoredPlayerName(name) {
   localStorage.setItem(PLAYER_NAME_KEY, (name || "").trim());
 }
 
+function getRoomIdFromPath() {
+  const path = location.pathname.replace(/^\/+|\/+$/g, "");
+  return path || undefined;
+}
+
 function getJoinUrl(sessionId) {
-  return `${location.origin}${location.pathname}?session=${sessionId}`;
+  return `${location.origin}/${sessionId}`;
 }
 
 function main() {
@@ -38,25 +42,28 @@ function main() {
 
   const onAction = (ev) => {
     if (ev?.type === "join" && ev.sessionId != null && ev.playerId && ev.playerName != null) {
-      game.joinSession(ev.sessionId, ev.playerId, ev.playerName);
-      sessionStorage.setItem(SESSION_ID_KEY, ev.sessionId);
+      const result = game.joinSession(ev.sessionId, ev.playerId, ev.playerName);
+      if (result === true) {
+        sessionStorage.setItem(SESSION_ID_KEY, ev.sessionId);
+        history.replaceState(null, "", `/${ev.sessionId}`);
+      }
+      return result;
     }
     if (ev?.type === "create") {
       const s = game.getSession();
-      if (s) sessionStorage.setItem(SESSION_ID_KEY, s.id);
+      if (s) {
+        sessionStorage.setItem(SESSION_ID_KEY, s.id);
+        history.replaceState(null, "", `/${s.id}`);
+      }
     }
     if (ev?.type === "reset") {
       sessionStorage.removeItem(SESSION_ID_KEY);
-      const url = new URL(location.href);
-      if (url.searchParams.has("session")) {
-        url.searchParams.delete("session");
-        history.replaceState(null, "", url.pathname);
-      }
+      history.replaceState(null, "", "/");
     }
   };
 
-  const urlSessionId = new URLSearchParams(location.search).get("session") || undefined;
-  const sync = createSync(game);
+  const urlSessionId = getRoomIdFromPath();
+  const sync = createSync(game, playerId);
   sync.init(urlSessionId);
 
   const helpers = {

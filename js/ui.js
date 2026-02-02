@@ -11,7 +11,7 @@ export function render(session, playerId, game, onAction, helpers = {}) {
 
   if (!session) {
     root.innerHTML = renderHome(helpers);
-    attachListeners(root, game, null, onAction, helpers);
+    attachListeners(root, game, playerId, onAction, helpers);
     return;
   }
 
@@ -97,6 +97,7 @@ function renderLobby(session, playerId, helpers) {
           <input type="text" id="join-name" class="input" placeholder="Enter your name" maxlength="20" value="${escapeHtml(storedName)}" />
         </div>
         <button class="btn primary" data-action="join">Join</button>
+        <p id="join-error" class="hint error" style="display:none"></p>
         ${count >= MAX_PLAYERS ? '<p class="hint error">Room is full.</p>' : ""}
       </div>
     `;
@@ -293,7 +294,16 @@ function attachListeners(root, game, playerId, onAction, helpers = {}) {
           const name = nameInput?.value?.trim() ?? "";
           helpers.setStoredPlayerName?.(name);
           const session = game.getSession();
-          if (session) onAction?.({ type: "join", sessionId: session.id, playerId, playerName: name });
+          if (session) {
+            const result = onAction?.({ type: "join", sessionId: session.id, playerId, playerName: name });
+            // Show inline error if join was rejected
+            const errEl = document.getElementById("join-error");
+            if (result === "duplicate_name") {
+              if (errEl) { errEl.textContent = "That name is already taken."; errEl.style.display = ""; }
+            } else if (errEl) {
+              errEl.style.display = "none";
+            }
+          }
           break;
         }
         case "start":

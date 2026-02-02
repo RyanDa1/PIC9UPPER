@@ -2,6 +2,6 @@
   "name": "pic9upper",
   "private": true,
   "scripts": {
-    "dev": "npx serve . -l 3000"
+    "dev": "npx serve . -l 3000 -s"
   }
 }
