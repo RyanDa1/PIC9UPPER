@@ -120,3 +120,13 @@ No implicit loops.
 - AI card generation
 - Persistent score history
 - Reconnect handling
+
+---
+
+## 7. Implementation Status
+
+### Completed
+
+- **Home button (all screens)** — Fixed-position `⌂` button in viewport top-left corner. Clicking it clears the session and returns to the create/join home screen. URL `?session=` param is also cleaned up. Only appears when a session is active (not on the home screen itself).
+- **Host crown indicator** — Room creator (`players[0]`) has a `👑` icon next to their name in lobby player list, vote buttons, and result cards.
+- **Create room flow** — Creating a room adds the creator directly into the lobby (no intermediate "join name" screen). Creator is automatically the host.
