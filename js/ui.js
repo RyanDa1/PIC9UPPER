@@ -451,7 +451,7 @@ function attachListeners(root, game, playerId, onAction, helpers = {}) {
           break;
         case "reset":
           game.resetSession();
-          onAction?.({ type: "reset" });
+          onAction?.({ type: "nextRound" });
           break;
         case "add-bot":
           game.addBot();
