@@ -2,6 +2,7 @@
   "name": "pic9upper",
   "compatibility_date": "2026-01-31",
   "assets": {
-    "directory": "."
+    "directory": ".",
+    "not_found_handling": "single-page-application"
   }
 }
