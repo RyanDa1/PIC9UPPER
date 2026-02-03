@@ -3,7 +3,7 @@
  * No separate frontend state machine.
  */
 
-import { Phase, getPlayerAssignment, getPlayerName, isHost, MIN_PLAYERS, MAX_PLAYERS } from "./session.js";
+import { Phase, getPlayerAssignment, getPlayerName, isHostPlayer, MIN_PLAYERS, MAX_PLAYERS } from "./session.js";
 
 const REVEAL_COUNTDOWN_SEC = 5;
 let revealTimerId = null;
@@ -48,16 +48,16 @@ export function render(session, playerId, game, onAction, helpers = {}) {
       screenHtml = renderDeal(session, playerId, assignment);
       break;
     case Phase.PLAY:
-      screenHtml = renderPlay(session, playerId);
+      screenHtml = renderPlay(session, playerId, helpers);
       break;
     case Phase.REVEAL:
-      screenHtml = renderReveal(session, playerId);
+      screenHtml = renderReveal(session, playerId, helpers);
       break;
     case Phase.VOTE:
-      screenHtml = renderVote(session, playerId);
+      screenHtml = renderVote(session, playerId, helpers);
       break;
     case Phase.RESULT:
-      screenHtml = renderResult(session, playerId);
+      screenHtml = renderResult(session, playerId, helpers);
       break;
     default:
       screenHtml = `<div class="screen"><p>Unknown phase: ${phase}</p></div>`;
@@ -128,7 +128,7 @@ function renderHome(helpers) {
 
 function renderLobby(session, playerId, helpers) {
   const isInLobby = session.players.includes(playerId);
-  const iAmHost = isHost(session, playerId);
+  const iAmHost = !!helpers.getIsHost?.();
   const count = session.players.length;
   const canStart = iAmHost && count >= MIN_PLAYERS && count <= MAX_PLAYERS;
   const joinUrl = helpers.getJoinUrl?.(session.id) ?? "";
@@ -169,7 +169,7 @@ function renderLobby(session, playerId, helpers) {
       <div class="players">
         ${session.players.map((p) => `
           <div class="player-tag ${p === playerId ? "you" : ""}">
-            ${isHost(session, p) ? '<span class="crown">\uD83D\uDC51</span> ' : ""}${escapeHtml(getPlayerName(session, p))}${p === playerId ? " (you)" : ""}${iAmHost && p !== playerId ? `<button class="btn-kick" data-action="kick" data-target="${p}" title="Remove player">\u2715</button>` : ""}
+            ${isHostPlayer(session, p) ? '<span class="crown">\uD83D\uDC51</span> ' : ""}${escapeHtml(getPlayerName(session, p))}${p === playerId ? " (you)" : ""}${iAmHost && p !== playerId ? `<button class="btn-kick" data-action="kick" data-target="${p}" title="Remove player">\u2715</button>` : ""}
           </div>
         `).join("")}
       </div>
@@ -226,8 +226,8 @@ function renderDeal(session, playerId, assignment) {
   `;
 }
 
-function renderPlay(session, playerId) {
-  const iAmHost = isHost(session, playerId);
+function renderPlay(session, playerId, helpers) {
+  const iAmHost = !!helpers.getIsHost?.();
 
   // Host: reveal the word button
   if (iAmHost) {
@@ -247,8 +247,8 @@ function renderPlay(session, playerId) {
   `;
 }
 
-function renderReveal(session, playerId) {
-  const iAmHost = isHost(session, playerId);
+function renderReveal(session, playerId, helpers) {
+  const iAmHost = !!helpers.getIsHost?.();
   const elapsed = session.revealStartTime ? (Date.now() - session.revealStartTime) / 1000 : REVEAL_COUNTDOWN_SEC;
   const remaining = Math.max(0, REVEAL_COUNTDOWN_SEC - Math.floor(elapsed));
   const countdownDone = remaining <= 0;
@@ -274,7 +274,7 @@ function renderReveal(session, playerId) {
   `;
 }
 
-function renderVote(session, playerId) {
+function renderVote(session, playerId, helpers) {
   const hasVoted = session.votes[playerId] != null;
 
   // After confirming: waiting screen
@@ -293,7 +293,7 @@ function renderVote(session, playerId) {
     : session.players.filter((p) => p !== playerId && p !== session.dealerId);
 
   const selections = session.voteSelection?.[playerId] || [];
-  const iAmHost = isHost(session, playerId);
+  const iAmHost = !!helpers.getIsHost?.();
   const maxVotes = iAmHost ? (session.hostVotes ?? 2) : (session.playerVotes ?? 1);
   const canConfirm = selections.length === maxVotes;
 
@@ -311,7 +311,7 @@ function renderVote(session, playerId) {
       <div class="vote-section">
         ${candidates.map((p) => `
           <button class="btn vote-btn ${selections.includes(p) ? "selected" : ""}" data-action="select-vote" data-target="${p}">
-            ${isHost(session, p) ? '<span class="crown">\uD83D\uDC51</span> ' : ""}${escapeHtml(getPlayerName(session, p))}
+            ${isHostPlayer(session, p) ? '<span class="crown">\uD83D\uDC51</span> ' : ""}${escapeHtml(getPlayerName(session, p))}
           </button>
         `).join("")}
       </div>
@@ -321,8 +321,8 @@ function renderVote(session, playerId) {
   `;
 }
 
-function renderResult(session, playerId) {
-  const iAmHost = isHost(session, playerId);
+function renderResult(session, playerId, helpers) {
+  const iAmHost = !!helpers.getIsHost?.();
 
   // Count votes: each entry in a player's vote array = 1 point for the target
   function countVotes(targetId) {
@@ -341,7 +341,7 @@ function renderResult(session, playerId) {
     word: session.assignments[p] ?? "(blank)",
     voteCount: countVotes(p),
     isYou: p === playerId,
-    isHostPlayer: isHost(session, p),
+    isHostPlayer: isHostPlayer(session, p),
     isDealer: p === session.dealerId,
   }));
 
@@ -441,12 +441,12 @@ function attachListeners(root, game, playerId, onAction, helpers = {}) {
           break;
         case "select-vote":
           if (target) {
-            game.selectVote(playerId, target);
+            game.selectVote(playerId, target, !!helpers.getIsHost?.());
             onAction?.({ type: "selectVote", target });
           }
           break;
         case "confirm-vote":
-          game.confirmVote(playerId);
+          game.confirmVote(playerId, !!helpers.getIsHost?.());
           onAction?.({ type: "confirmVote" });
           break;
         case "reset":

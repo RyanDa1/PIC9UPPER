@@ -3,7 +3,7 @@
  * LOBBY → DEAL → PLAY → REVEAL → VOTE → RESULT
  */
 
-import { Phase, createSession, generateId, isHost, MIN_PLAYERS, MAX_PLAYERS } from "./session.js";
+import { Phase, createSession, generateId, isHostPlayer, MIN_PLAYERS, MAX_PLAYERS } from "./session.js";
 
 const SAMPLE_WORDS = [
   { correct: "Ocean", wrong: "Desert" },
@@ -197,21 +197,21 @@ export class GameManager {
     return true;
   }
 
-  /** How many votes this player gets */
-  getVoteCount(playerId) {
+  /** How many votes this player gets — isHost is passed from local flag, not derived from session */
+  getVoteCount(playerId, isHost = false) {
     if (!this.session) return 1;
-    return isHost(this.session, playerId) ? (this.session.hostVotes ?? 2) : (this.session.playerVotes ?? 1);
+    return isHost ? (this.session.hostVotes ?? 2) : (this.session.playerVotes ?? 1);
   }
 
   /** Toggle a vote target in/out of this player's local selection (NO broadcast) */
-  selectVote(playerId, targetPlayerId) {
+  selectVote(playerId, targetPlayerId, isHost = false) {
     if (!this.session || this.session.phase !== Phase.VOTE) return false;
     if (!this.session.players.includes(playerId)) return false;
     if (!this.session.players.includes(targetPlayerId)) return false;
 
     const current = [...(this.session.voteSelection?.[playerId] || [])];
     const idx = current.indexOf(targetPlayerId);
-    const maxVotes = this.getVoteCount(playerId);
+    const maxVotes = this.getVoteCount(playerId, isHost);
 
     if (idx >= 0) {
       // Deselect
@@ -236,12 +236,12 @@ export class GameManager {
   }
 
   /** Player confirms their votes — when all confirmed, auto-transition to RESULT */
-  confirmVote(playerId) {
+  confirmVote(playerId, isHost = false) {
     if (!this.session || this.session.phase !== Phase.VOTE) return false;
     if (!this.session.players.includes(playerId)) return false;
     const selections = this.session.voteSelection?.[playerId];
     if (!selections || selections.length === 0) return false;
-    if (selections.length !== this.getVoteCount(playerId)) return false;
+    if (selections.length !== this.getVoteCount(playerId, isHost)) return false;
 
     const votes = { ...this.session.votes, [playerId]: [...selections] };
     // Dealer's first selection is their guess
@@ -301,7 +301,7 @@ export class GameManager {
     const candidates = this.session.players.filter((p) => p !== this.session.dealerId);
     this.session.players.forEach((p) => {
       if (!votes[p] && candidates.length > 0) {
-        const n = this.getVoteCount(p);
+        const n = this.getVoteCount(p, isHostPlayer(this.session, p));
         const picks = [];
         for (let i = 0; i < n; i++) {
           picks.push(candidates[Math.floor(Math.random() * candidates.length)]);

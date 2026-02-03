@@ -46,10 +46,10 @@ export function createSession(id = generateId()) {
 }
 
 /**
- * Check if a player is the host by comparing their display name to session.hostName.
- * Names are unique and immutable once set, so this is a reliable identity check.
+ * Check if a given player should display the host crown (UI only).
+ * NOT used for permission checks — those use the local isHost flag.
  */
-export function isHost(session, playerId) {
+export function isHostPlayer(session, playerId) {
   if (!session || !session.hostName) return false;
   const name = session.playerNames?.[playerId];
   return !!name && name === session.hostName;

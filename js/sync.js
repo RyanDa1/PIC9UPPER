@@ -6,8 +6,6 @@
  * The host tab tracks last-seen times and prunes players gone >10s.
  */
 
-import { isHost } from "./session.js";
-
 const CHANNEL = "pic9upper-sync";
 const HEARTBEAT_INTERVAL = 3000;
 const PRUNE_INTERVAL = 5000;
@@ -15,6 +13,8 @@ const PRESENCE_TIMEOUT = 10000;
 
 export function createSync(gameManager, playerId, opts = {}) {
   const devMode = !!opts.devMode;
+  const getIsHost = opts.getIsHost || (() => false);
+  const setIsHost = opts.setIsHost || (() => {});
   const channel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(CHANNEL) : null;
 
   if (!channel) {
@@ -57,7 +57,7 @@ export function createSync(gameManager, playerId, opts = {}) {
     const session = gameManager.getSession();
     if (!session || session.phase !== "LOBBY") { stopHeartbeat(); return; }
     // Only the host runs pruning
-    if (!isHost(session, playerId)) return;
+    if (!getIsHost()) return;
 
     const now = Date.now();
     const toRemove = session.players.filter((pid) => {
@@ -92,7 +92,7 @@ export function createSync(gameManager, playerId, opts = {}) {
     const session = gameManager.getSession();
     if (!session) return;
 
-    const iAmHost = isHost(session, playerId);
+    const iAmHost = getIsHost();
 
     if (session.phase === "LOBBY" || iAmHost) {
       // Host always broadcasts full state; in LOBBY everyone can (join/leave need it)
@@ -118,11 +118,6 @@ export function createSync(gameManager, playerId, opts = {}) {
       if (current && current.id !== incoming.id) return; // wrong session
       // Skip if session is identical (avoids re-render that clears input fields)
       if (current && JSON.stringify(current) === JSON.stringify(incoming)) return;
-      // Protect hostName: never let an incoming STATE erase a known hostName
-      // (can happen if sender restored from an old localStorage snapshot without hostName)
-      if (current && current.hostName && !incoming.hostName) {
-        incoming.hostName = current.hostName;
-      }
       // Preserve this tab's local vote selection when receiving state from other tabs
       if (current && incoming.phase === "VOTE" && current.voteSelection?.[playerId]) {
         incoming.voteSelection = { ...incoming.voteSelection, [playerId]: current.voteSelection[playerId] };
@@ -136,7 +131,7 @@ export function createSync(gameManager, playerId, opts = {}) {
       const current = gameManager.getSession();
       if (!current) return;
       if (current.id !== e.data.session.id) return;
-      if (!isHost(current, playerId)) return; // only host processes actions
+      if (!getIsHost()) return; // only host processes actions
 
       const incoming = e.data.session;
       // Merge: keep host's players array (authoritative), take incoming phase + data maps
@@ -144,7 +139,6 @@ export function createSync(gameManager, playerId, opts = {}) {
         ...incoming,
         players: [...current.players],           // host's player order is authoritative
         playerNames: { ...current.playerNames },  // preserve names
-        hostName: current.hostName,               // host identity is authoritative
       };
       // Preserve host's own local vote selection
       if (merged.phase === "VOTE" && current.voteSelection?.[playerId]) {
@@ -169,8 +163,17 @@ export function createSync(gameManager, playerId, opts = {}) {
     if (e.data?.type === "LEAVE" && e.data?.playerId) {
       const session = gameManager.getSession();
       if (session && session.phase === "LOBBY" && session.players.includes(e.data.playerId)) {
+        const leavingName = session.playerNames?.[e.data.playerId];
+        const wasHost = leavingName && leavingName === session.hostName;
         delete lastSeen[e.data.playerId];
         gameManager.leaveSession(e.data.playerId);
+        // Host transfer: if the host left, the new first player becomes host
+        if (wasHost) {
+          const updated = gameManager.getSession();
+          if (updated && updated.players.length > 0 && updated.players[0] === playerId) {
+            setIsHost(true);
+          }
+        }
       }
     }
   };

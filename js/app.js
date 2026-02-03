@@ -17,6 +17,15 @@ const PLAYER_ID_KEY = "pic9upper-playerId";
 const SESSION_ID_KEY = "pic9upper-sessionId";
 const PLAYER_NAME_KEY = "pic9upper-playerName";
 const SESSION_SNAPSHOT_KEY = "pic9upper-session";
+const HOST_FLAG_KEY = "pic9upper-isHost";
+
+/** Local host flag — stored per-tab in sessionStorage, never synced via BroadcastChannel */
+function getIsHost() {
+  return sessionStorage.getItem(HOST_FLAG_KEY) === "true";
+}
+function setIsHost(val) {
+  sessionStorage.setItem(HOST_FLAG_KEY, val ? "true" : "false");
+}
 
 function getPlayerId() {
   if (DEV_MODE) {
@@ -59,12 +68,14 @@ function main() {
     if (ev?.type === "join" && ev.sessionId != null && ev.playerId && ev.playerName != null) {
       const result = game.joinSession(ev.sessionId, ev.playerId, ev.playerName);
       if (result === true) {
+        setIsHost(false);  // joining = not host
         sessionStorage.setItem(SESSION_ID_KEY, ev.sessionId);
         history.replaceState(null, "", `/${ev.sessionId}`);
       }
       return result;
     }
     if (ev?.type === "create") {
+      setIsHost(true);  // room creator = host
       const s = game.getSession();
       if (s) {
         sessionStorage.setItem(SESSION_ID_KEY, s.id);
@@ -72,6 +83,7 @@ function main() {
       }
     }
     if (ev?.type === "reset") {
+      setIsHost(false);
       sessionStorage.removeItem(SESSION_ID_KEY);
       localStorage.removeItem(SESSION_SNAPSHOT_KEY);
       history.replaceState(null, "", "/");
@@ -79,7 +91,7 @@ function main() {
   };
 
   const urlSessionId = getRoomIdFromPath();
-  const sync = createSync(game, playerId, { devMode: DEV_MODE });
+  const sync = createSync(game, playerId, { devMode: DEV_MODE, getIsHost, setIsHost });
 
   // Production: persist session snapshot so a solo-tab refresh can restore state
   if (!DEV_MODE) {
@@ -106,6 +118,11 @@ function main() {
             snapshot.hostName = snapshot.playerNames[snapshot.players[0]] ?? null;
           }
           game.setSession(snapshot);
+          // Restore host flag: if my name matches hostName, I was probably the host
+          const myName = getStoredPlayerName();
+          if (myName && snapshot.hostName && myName === snapshot.hostName) {
+            setIsHost(true);
+          }
         }
       }
     } catch { /* ignore corrupt data */ }
@@ -115,6 +132,8 @@ function main() {
     getStoredPlayerName,
     setStoredPlayerName,
     getJoinUrl,
+    getIsHost,
+    setIsHost,
     urlSessionId,
     requestSession: (id) => sync.requestState(id),
   };
