@@ -3,7 +3,7 @@
  * No separate frontend state machine.
  */
 
-import { Phase, getPlayerAssignment, getPlayerName, MIN_PLAYERS, MAX_PLAYERS } from "./session.js";
+import { Phase, getPlayerAssignment, getPlayerName, isHost, MIN_PLAYERS, MAX_PLAYERS } from "./session.js";
 
 const REVEAL_COUNTDOWN_SEC = 5;
 let revealTimerId = null;
@@ -128,9 +128,9 @@ function renderHome(helpers) {
 
 function renderLobby(session, playerId, helpers) {
   const isInLobby = session.players.includes(playerId);
-  const isHost = session.players[0] === playerId;
+  const iAmHost = isHost(session, playerId);
   const count = session.players.length;
-  const canStart = isHost && count >= MIN_PLAYERS && count <= MAX_PLAYERS;
+  const canStart = iAmHost && count >= MIN_PLAYERS && count <= MAX_PLAYERS;
   const joinUrl = helpers.getJoinUrl?.(session.id) ?? "";
   const storedName = helpers.getStoredPlayerName?.() ?? "";
 
@@ -169,7 +169,7 @@ function renderLobby(session, playerId, helpers) {
       <div class="players">
         ${session.players.map((p) => `
           <div class="player-tag ${p === playerId ? "you" : ""}">
-            ${p === session.players[0] ? '<span class="crown">\uD83D\uDC51</span> ' : ""}${escapeHtml(getPlayerName(session, p))}${p === playerId ? " (you)" : ""}${isHost && p !== playerId ? `<button class="btn-kick" data-action="kick" data-target="${p}" title="Remove player">\u2715</button>` : ""}
+            ${isHost(session, p) ? '<span class="crown">\uD83D\uDC51</span> ' : ""}${escapeHtml(getPlayerName(session, p))}${p === playerId ? " (you)" : ""}${iAmHost && p !== playerId ? `<button class="btn-kick" data-action="kick" data-target="${p}" title="Remove player">\u2715</button>` : ""}
           </div>
         `).join("")}
       </div>
@@ -177,7 +177,7 @@ function renderLobby(session, playerId, helpers) {
       <p class="hint">${playerCountHint}</p>
 
       ${canStart ? '<button class="btn primary" data-action="start">Start game</button>' : ""}
-      ${isHost && count < MAX_PLAYERS ? '<button class="btn secondary dev-btn" data-action="add-bot">+ Add test player</button>' : ""}
+      ${iAmHost && count < MAX_PLAYERS ? '<button class="btn secondary dev-btn" data-action="add-bot">+ Add test player</button>' : ""}
     </div>
   `;
 }
@@ -227,10 +227,10 @@ function renderDeal(session, playerId, assignment) {
 }
 
 function renderPlay(session, playerId) {
-  const isHost = session.players[0] === playerId;
+  const iAmHost = isHost(session, playerId);
 
   // Host: reveal the word button
-  if (isHost) {
+  if (iAmHost) {
     return `
       <div class="screen play">
         <p class="phase-hint">Everyone has placed their cards.</p>
@@ -248,7 +248,7 @@ function renderPlay(session, playerId) {
 }
 
 function renderReveal(session, playerId) {
-  const isHost = session.players[0] === playerId;
+  const iAmHost = isHost(session, playerId);
   const elapsed = session.revealStartTime ? (Date.now() - session.revealStartTime) / 1000 : REVEAL_COUNTDOWN_SEC;
   const remaining = Math.max(0, REVEAL_COUNTDOWN_SEC - Math.floor(elapsed));
   const countdownDone = remaining <= 0;
@@ -256,7 +256,7 @@ function renderReveal(session, playerId) {
   let bottomSection;
   if (!countdownDone) {
     bottomSection = `<div class="countdown" id="reveal-countdown">${remaining}</div>`;
-  } else if (isHost) {
+  } else if (iAmHost) {
     bottomSection = `
       <p class="phase-hint">Listen to their stories.</p>
       <button class="btn primary" data-action="advance-reveal">Everyone is ready to vote</button>
@@ -293,8 +293,8 @@ function renderVote(session, playerId) {
     : session.players.filter((p) => p !== playerId && p !== session.dealerId);
 
   const selections = session.voteSelection?.[playerId] || [];
-  const isHost = session.players[0] === playerId;
-  const maxVotes = isHost ? (session.hostVotes ?? 2) : (session.playerVotes ?? 1);
+  const iAmHost = isHost(session, playerId);
+  const maxVotes = iAmHost ? (session.hostVotes ?? 2) : (session.playerVotes ?? 1);
   const canConfirm = selections.length === maxVotes;
 
   const prompt = isDealer
@@ -311,7 +311,7 @@ function renderVote(session, playerId) {
       <div class="vote-section">
         ${candidates.map((p) => `
           <button class="btn vote-btn ${selections.includes(p) ? "selected" : ""}" data-action="select-vote" data-target="${p}">
-            ${p === session.players[0] ? '<span class="crown">\uD83D\uDC51</span> ' : ""}${escapeHtml(getPlayerName(session, p))}
+            ${isHost(session, p) ? '<span class="crown">\uD83D\uDC51</span> ' : ""}${escapeHtml(getPlayerName(session, p))}
           </button>
         `).join("")}
       </div>
@@ -322,7 +322,7 @@ function renderVote(session, playerId) {
 }
 
 function renderResult(session, playerId) {
-  const hostId = session.players[0];
+  const iAmHost = isHost(session, playerId);
 
   // Count votes: each entry in a player's vote array = 1 point for the target
   function countVotes(targetId) {
@@ -341,7 +341,7 @@ function renderResult(session, playerId) {
     word: session.assignments[p] ?? "(blank)",
     voteCount: countVotes(p),
     isYou: p === playerId,
-    isHost: p === hostId,
+    isHostPlayer: isHost(session, p),
     isDealer: p === session.dealerId,
   }));
 
@@ -354,7 +354,7 @@ function renderResult(session, playerId) {
       <div class="result-grid">
         ${assignments.map((a) => `
           <div class="result-card ${a.isYou ? "you" : ""} ${a.isDealer ? "dealer" : ""}">
-            <span class="player">${a.isHost ? '<span class="crown">\uD83D\uDC51</span> ' : ""}${escapeHtml(a.isYou ? "You" : a.name)}${a.isDealer ? " (dealer)" : ""}</span>
+            <span class="player">${a.isHostPlayer ? '<span class="crown">\uD83D\uDC51</span> ' : ""}${escapeHtml(a.isYou ? "You" : a.name)}${a.isDealer ? " (dealer)" : ""}</span>
             <span class="word">${escapeHtml(a.word)}</span>
             <span class="votes">${a.voteCount} vote${a.voteCount !== 1 ? "s" : ""}</span>
           </div>
@@ -362,7 +362,7 @@ function renderResult(session, playerId) {
       </div>
       <p class="dealer-guess">Dealer guessed: ${escapeHtml(dealerGuessName)}</p>
       <p class="hint">Host: ${hostVotes} vote${hostVotes !== 1 ? "s" : ""} · Player: ${playerVotes} vote${playerVotes !== 1 ? "s" : ""}</p>
-      <button class="btn primary" data-action="reset">New round</button>
+      ${iAmHost ? '<button class="btn primary" data-action="reset">Next round</button>' : ""}
     </div>
   `;
 }

@@ -6,6 +6,8 @@
  * The host tab tracks last-seen times and prunes players gone >10s.
  */
 
+import { isHost } from "./session.js";
+
 const CHANNEL = "pic9upper-sync";
 const HEARTBEAT_INTERVAL = 3000;
 const PRUNE_INTERVAL = 5000;
@@ -54,8 +56,8 @@ export function createSync(gameManager, playerId, opts = {}) {
   function pruneStale() {
     const session = gameManager.getSession();
     if (!session || session.phase !== "LOBBY") { stopHeartbeat(); return; }
-    // Only the host (players[0]) runs pruning
-    if (session.players[0] !== playerId) return;
+    // Only the host runs pruning
+    if (!isHost(session, playerId)) return;
 
     const now = Date.now();
     const toRemove = session.players.filter((pid) => {
@@ -87,9 +89,9 @@ export function createSync(gameManager, playerId, opts = {}) {
     const session = gameManager.getSession();
     if (!session) return;
 
-    const isHost = session.players[0] === playerId;
+    const iAmHost = isHost(session, playerId);
 
-    if (session.phase === "LOBBY" || isHost) {
+    if (session.phase === "LOBBY" || iAmHost) {
       // Host always broadcasts full state; in LOBBY everyone can (join/leave need it)
       channel.postMessage({ type: "STATE", session });
     } else {
@@ -126,7 +128,7 @@ export function createSync(gameManager, playerId, opts = {}) {
       const current = gameManager.getSession();
       if (!current) return;
       if (current.id !== e.data.session.id) return;
-      if (current.players[0] !== playerId) return; // only host processes actions
+      if (!isHost(current, playerId)) return; // only host processes actions
 
       const incoming = e.data.session;
       // Merge: keep host's players array (authoritative), take incoming phase + data maps
@@ -134,6 +136,7 @@ export function createSync(gameManager, playerId, opts = {}) {
         ...incoming,
         players: [...current.players],           // host's player order is authoritative
         playerNames: { ...current.playerNames },  // preserve names
+        hostName: current.hostName,               // host identity is authoritative
       };
       // Preserve host's own local vote selection
       if (merged.phase === "VOTE" && current.voteSelection?.[playerId]) {

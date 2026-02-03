@@ -30,6 +30,7 @@ export function createSession(id = generateId()) {
     phase: Phase.LOBBY,
     players: [],
     playerNames: {},        // Map<PlayerID, string> - display names
+    hostName: null,         // The host's display name (unique, immutable once set)
     hostVotes: DEFAULT_HOST_VOTES,       // how many picks the host gets
     playerVotes: DEFAULT_PLAYER_VOTES,   // how many picks regular players get
     dealerId: null,
@@ -42,6 +43,16 @@ export function createSession(id = generateId()) {
     dealerGuess: null,
     revealStartTime: null,
   };
+}
+
+/**
+ * Check if a player is the host by comparing their display name to session.hostName.
+ * Names are unique and immutable once set, so this is a reliable identity check.
+ */
+export function isHost(session, playerId) {
+  if (!session || !session.hostName) return false;
+  const name = session.playerNames?.[playerId];
+  return !!name && name === session.hostName;
 }
 
 export function getPlayerName(session, playerId) {

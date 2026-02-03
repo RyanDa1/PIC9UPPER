@@ -75,6 +75,7 @@ Session {
   phase: Phase
 
   players: PlayerID[]
+  hostName: string         // host's display name (unique, immutable identity)
   dealerId: PlayerID
 
   words: {
@@ -128,17 +129,17 @@ No implicit loops.
 ### Completed
 
 - **Home button (all screens)** — Fixed-position `⌂` button in viewport top-left corner. Clicking it clears the session and returns to the create/join home screen. URL resets to `/`. Only appears when a session is active (not on the home screen itself).
-- **Host crown indicator** — Room creator (`players[0]`) has a `👑` icon next to their name in lobby player list, vote buttons, and result cards.
+- **Host crown indicator** — Room creator has a `👑` icon next to their name in lobby player list, vote buttons, and result cards. Host identity is determined by matching the player's display name against `session.hostName`.
 - **Create room flow** — Creating a room adds the creator directly into the lobby (no intermediate "join name" screen). Creator is automatically the host.
 - **Path-based room URLs** — Rooms use `/{roomID}` URLs instead of query params. Creating a room navigates to `/{roomID}`. Sharing the URL lets others land on the join screen directly. Resetting navigates back to `/`. SPA fallback configured for both local dev (`serve.json`) and Cloudflare Pages (`_redirects`). Asset paths use absolute `/` prefix so they load correctly from any route.
 - **Streamlined create flow** — Room creator skips the "join name" screen entirely and goes straight to the lobby. Only non-host players arriving via shared link or room ID see the join screen.
 - **Lobby presence detection** — Two-layer approach for removing disconnected players during LOBBY:
   1. **Instant `LEAVE`**: On `beforeunload`, the closing tab sends a `LEAVE` message via BroadcastChannel. Any tab that receives it immediately calls `leaveSession()` to remove that player — removal is instant.
-  2. **Heartbeat fallback**: Each tab sends a `HEARTBEAT` every 3s. The host tab (`players[0]`) tracks last-seen timestamps and prunes any player not heard from in 10s (checked every 5s). This catches cases where `beforeunload` doesn't fire (browser crash, killed process).
+  2. **Heartbeat fallback**: Each tab sends a `HEARTBEAT` every 3s. The host tab tracks last-seen timestamps and prunes any player not heard from in 10s (checked every 5s). This catches cases where `beforeunload` doesn't fire (browser crash, killed process).
   - Bots (`bot-*` IDs) are exempt from pruning. If the host tab closes, the next player becomes host and takes over pruning (fresh grace period). Intervals are cleaned up when phase leaves LOBBY or session is cleared.
 - **Duplicate name prevention** — `joinSession()` checks existing player names (case-insensitive). Returns `"duplicate_name"` if the name is already taken. The join screen shows an inline error message. `createSession()` (host) is not checked since the host is always the first player.
 - **Lobby UI cleanup** — Room ID display removed from lobby. Share link is now visible to all players (not just the host), so anyone can invite others. The join screen also no longer shows the Room ID.
-- **Host transfer** — When the host disconnects, the next player (`players[0]` after removal) automatically becomes host. The new host's UI updates fully: they see the Start game button, Add test player button, and take over heartbeat pruning responsibility. No special initialization needed — host status is purely derived from `players[0]` on every render.
+- **Host transfer** — When the host disconnects, `hostName` is transferred to the next player in line. The new host's UI updates fully: they see the Start game button, Add test player button, and take over heartbeat pruning responsibility.
 - **Dev / Production session modes** — Controlled by `DEV_MODE` flag (auto-detected via `location.hostname`):
   - **Dev (localhost):** Fresh `playerId` per page load (`sessionStorage`). Each tab = separate player. Instant `LEAVE` on `beforeunload` so refresh = disconnect. Ideal for multi-tab testing.
   - **Production:** Sticky `playerId` in `localStorage` (survives refresh, shared across tabs in same browser). No instant `LEAVE` on unload — departure detected only via heartbeat timeout (~10s). Refreshing a tab doesn't remove the player. Multiple tabs to the same room URL share the same player identity. Session state is snapshotted to `localStorage` so a solo-tab refresh can restore the game state without needing another tab to respond via BroadcastChannel.
@@ -158,4 +159,5 @@ No implicit loops.
   - Removed: separate "VOTE" title, dev:complete-votes button, separate dealer guess section.
 - **Room parameters (vote counts)** — Session carries `hostVotes` (default 2) and `playerVotes` (default 1), controlling how many people each player can select during the VOTE phase. The host gets 2 picks, regular players get 1. Each pick = 1 vote in the result tally. A "X / N selected" counter is shown when a player has more than 1 vote. The "Vote" button is only enabled when exactly N selections are made. These parameters will be configurable in the lobby in a future update.
 - **RESULT display** — Result cards show total vote counts received. Dealer is visually dimmed and tagged "(dealer)". A legend shows how many votes host vs players had. Dealer's first selection doubles as their guess (`dealerGuess`).
-- **Host-authoritative sync** — After LOBBY, only the host tab (`players[0]`) broadcasts full `STATE` messages via BroadcastChannel. Non-host tabs send lightweight `ACTION` messages instead. The host merges incoming actions (preserving the authoritative `players` array and its own vote selection) and rebroadcasts. This prevents race conditions where a non-host tab could overwrite the players array or corrupt host identity.
+- **Host-authoritative sync** — After LOBBY, only the host tab broadcasts full `STATE` messages via BroadcastChannel. Non-host tabs send lightweight `ACTION` messages instead. The host merges incoming actions (preserving the authoritative `players` array, `hostName`, and its own vote selection) and rebroadcasts. This prevents race conditions where a non-host tab could overwrite the players array or corrupt host identity.
+- **Name-based host identity** — Host identity is stored as `session.hostName` (the host's display name) rather than relying on player array position (`players[0]`). Since names are unique (case-insensitive, enforced at join) and immutable once set, comparing a player's name against `hostName` is a stable, reliable way to determine host status. The `isHost(session, playerId)` helper function is used consistently across all files (`ui.js`, `game.js`, `sync.js`). `hostName` is set when the room is created, transferred when the host leaves, and preserved across rounds (`resetSession`).

@@ -3,7 +3,7 @@
  * LOBBY → DEAL → PLAY → REVEAL → VOTE → RESULT
  */
 
-import { Phase, createSession, generateId, MIN_PLAYERS, MAX_PLAYERS } from "./session.js";
+import { Phase, createSession, generateId, isHost, MIN_PLAYERS, MAX_PLAYERS } from "./session.js";
 
 const SAMPLE_WORDS = [
   { correct: "Ocean", wrong: "Desert" },
@@ -36,11 +36,13 @@ export class GameManager {
   createSession(playerId, playerName) {
     this.session = createSession();
     if (playerId) {
-      const playerNames = { [playerId]: (playerName || "").trim() || `Player ${playerId.slice(0, 4)}` };
+      const name = (playerName || "").trim() || `Player ${playerId.slice(0, 4)}`;
+      const playerNames = { [playerId]: name };
       this.session = {
         ...this.session,
         players: [playerId],
         playerNames,
+        hostName: name,   // room creator's name = host identity (permanent)
       };
     }
     this.notify();
@@ -70,12 +72,22 @@ export class GameManager {
     if (!this.session) return;
     if (this.session.phase !== Phase.LOBBY) return;
 
+    const leavingName = this.session.playerNames?.[playerId];
     const playerNames = { ...(this.session.playerNames || {}) };
     delete playerNames[playerId];
+    const remaining = this.session.players.filter((p) => p !== playerId);
+
+    // If the host leaves, transfer hostName to the next player in line
+    let hostName = this.session.hostName;
+    if (leavingName && leavingName === hostName) {
+      hostName = remaining.length > 0 ? (playerNames[remaining[0]] ?? null) : null;
+    }
+
     this.session = {
       ...this.session,
-      players: this.session.players.filter((p) => p !== playerId),
+      players: remaining,
       playerNames,
+      hostName,
       assignments: { ...this.session.assignments },
     };
     delete this.session.assignments[playerId];
@@ -188,8 +200,7 @@ export class GameManager {
   /** How many votes this player gets */
   getVoteCount(playerId) {
     if (!this.session) return 1;
-    const isHost = this.session.players[0] === playerId;
-    return isHost ? (this.session.hostVotes ?? 2) : (this.session.playerVotes ?? 1);
+    return isHost(this.session, playerId) ? (this.session.hostVotes ?? 2) : (this.session.playerVotes ?? 1);
   }
 
   /** Toggle a vote target in/out of this player's local selection (NO broadcast) */
@@ -205,11 +216,15 @@ export class GameManager {
     if (idx >= 0) {
       // Deselect
       current.splice(idx, 1);
+    } else if (maxVotes === 1) {
+      // Single-vote: replace current selection directly
+      current.length = 0;
+      current.push(targetPlayerId);
     } else if (current.length < maxVotes) {
-      // Add selection
+      // Multi-vote: add selection if under limit
       current.push(targetPlayerId);
     }
-    // If already at max and tapping a new target, ignore (must deselect first)
+    // Multi-vote at max: must deselect one first
 
     const voteSelection = { ...(this.session.voteSelection || {}), [playerId]: current };
     this.session = { ...this.session, voteSelection };
@@ -253,6 +268,7 @@ export class GameManager {
       ...createSession(this.session.id),
       players: [...this.session.players],
       playerNames: { ...(this.session.playerNames || {}) },
+      hostName: this.session.hostName,   // preserve host identity across rounds
     };
     this.notify();
   }
