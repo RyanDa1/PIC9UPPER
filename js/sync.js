@@ -64,7 +64,10 @@ export function createSync(gameManager, playerId, opts = {}) {
       if (pid === playerId) return false;         // never prune self
       if (pid.startsWith("bot-")) return false;   // bots are exempt
       const ts = lastSeen[pid];
-      return !ts || (now - ts > PRESENCE_TIMEOUT);
+      // Only prune players we've seen before but timed out — never prune unseen players
+      // (they may have just returned to LOBBY and not sent a heartbeat yet)
+      if (!ts) return false;
+      return (now - ts > PRESENCE_TIMEOUT);
     });
 
     for (const pid of toRemove) {
@@ -115,6 +118,11 @@ export function createSync(gameManager, playerId, opts = {}) {
       if (current && current.id !== incoming.id) return; // wrong session
       // Skip if session is identical (avoids re-render that clears input fields)
       if (current && JSON.stringify(current) === JSON.stringify(incoming)) return;
+      // Protect hostName: never let an incoming STATE erase a known hostName
+      // (can happen if sender restored from an old localStorage snapshot without hostName)
+      if (current && current.hostName && !incoming.hostName) {
+        incoming.hostName = current.hostName;
+      }
       // Preserve this tab's local vote selection when receiving state from other tabs
       if (current && incoming.phase === "VOTE" && current.voteSelection?.[playerId]) {
         incoming.voteSelection = { ...incoming.voteSelection, [playerId]: current.voteSelection[playerId] };

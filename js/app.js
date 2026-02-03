@@ -101,6 +101,10 @@ function main() {
       if (raw) {
         const snapshot = JSON.parse(raw);
         if (snapshot && snapshot.id === urlSessionId && snapshot.players?.includes(playerId)) {
+          // Backfill hostName for snapshots saved before the hostName feature
+          if (!snapshot.hostName && snapshot.players?.length > 0 && snapshot.playerNames) {
+            snapshot.hostName = snapshot.playerNames[snapshot.players[0]] ?? null;
+          }
           game.setSession(snapshot);
         }
       }
