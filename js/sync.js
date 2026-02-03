@@ -11,7 +11,8 @@ const HEARTBEAT_INTERVAL = 3000;
 const PRUNE_INTERVAL = 5000;
 const PRESENCE_TIMEOUT = 10000;
 
-export function createSync(gameManager, playerId) {
+export function createSync(gameManager, playerId, opts = {}) {
+  const devMode = !!opts.devMode;
   const channel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(CHANNEL) : null;
 
   if (!channel) {
@@ -82,23 +83,32 @@ export function createSync(gameManager, playerId) {
   /* ---- Broadcast (existing) ---- */
   const broadcast = () => {
     if (suppressBroadcast) return;
+    if (gameManager.localOnly) return; // skip broadcast for local-only changes (e.g. vote selection)
     const session = gameManager.getSession();
     if (session) {
       channel.postMessage({ type: "STATE", session });
     }
   };
 
-  const requestState = (sessionId) => {
-    channel.postMessage({ type: "NEED_STATE", sessionId });
-  };
+
+  // Track which session this tab cares about (set via init or joining)
+  let wantedSessionId = null;
 
   /* ---- Message handler ---- */
   channel.onmessage = (e) => {
     if (e.data?.type === "STATE" && e.data?.session) {
       const current = gameManager.getSession();
       const incoming = e.data.session;
+      // Only accept state for a session we're part of or explicitly requested
+      if (!current && !wantedSessionId) return; // homepage — ignore
+      if (wantedSessionId && incoming.id !== wantedSessionId) return; // wrong session
+      if (current && current.id !== incoming.id) return; // wrong session
       // Skip if session is identical (avoids re-render that clears input fields)
       if (current && JSON.stringify(current) === JSON.stringify(incoming)) return;
+      // Preserve this tab's local vote selection when receiving state from other tabs
+      if (current && incoming.phase === "VOTE" && current.voteSelection?.[playerId]) {
+        incoming.voteSelection = { ...incoming.voteSelection, [playerId]: current.voteSelection[playerId] };
+      }
       suppressBroadcast = true;
       gameManager.setSession(incoming);
       suppressBroadcast = false;
@@ -107,7 +117,7 @@ export function createSync(gameManager, playerId) {
       const session = gameManager.getSession();
       if (session) {
         const wanted = e.data?.sessionId;
-        if (!wanted || session.id === wanted) channel.postMessage({ type: "STATE", session });
+        if (wanted && session.id === wanted) channel.postMessage({ type: "STATE", session });
       }
     }
     if (e.data?.type === "HEARTBEAT") {
@@ -122,23 +132,37 @@ export function createSync(gameManager, playerId) {
     }
   };
 
-  /* ---- Send LEAVE on tab close for instant removal ---- */
-  window.addEventListener("beforeunload", () => {
-    const session = gameManager.getSession();
-    if (session && session.phase === "LOBBY" && session.players.includes(playerId)) {
-      channel.postMessage({ type: "LEAVE", playerId, sessionId: session.id });
-    }
-  });
+  /* ---- Send LEAVE on tab close ---- */
+  // Dev mode: instant LEAVE on every unload (refresh = disconnect, each tab = player).
+  // Production: no instant LEAVE — rely on heartbeat timeout so refresh doesn't remove the player.
+  if (devMode) {
+    window.addEventListener("beforeunload", () => {
+      const session = gameManager.getSession();
+      if (session && session.phase === "LOBBY" && session.players.includes(playerId)) {
+        channel.postMessage({ type: "LEAVE", playerId, sessionId: session.id });
+      }
+    });
+  }
 
   return {
     broadcast,
-    requestState,
+    requestState: (sessionId) => {
+      if (sessionId) {
+        wantedSessionId = sessionId;
+        channel.postMessage({ type: "NEED_STATE", sessionId });
+      }
+    },
     init: (sessionId) => {
+      wantedSessionId = sessionId || null;
       gameManager.subscribe((session) => {
+        // Keep wantedSessionId in sync when we create/join a session
+        if (session) wantedSessionId = session.id;
         broadcast();
         onSessionChange(session);
       });
-      requestState(sessionId);
+      if (sessionId) {
+        channel.postMessage({ type: "NEED_STATE", sessionId });
+      }
     },
   };
 }

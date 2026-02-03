@@ -21,18 +21,26 @@ const PHASE_ORDER = [
   Phase.RESULT,
 ];
 
+export const DEFAULT_HOST_VOTES = 2;
+export const DEFAULT_PLAYER_VOTES = 1;
+
 export function createSession(id = generateId()) {
   return {
     id,
     phase: Phase.LOBBY,
     players: [],
-    playerNames: {}, // Map<PlayerID, string> - display names
+    playerNames: {},        // Map<PlayerID, string> - display names
+    hostVotes: DEFAULT_HOST_VOTES,       // how many picks the host gets
+    playerVotes: DEFAULT_PLAYER_VOTES,   // how many picks regular players get
     dealerId: null,
     words: { correct: "", wrong: "" },
-    assignments: {}, // Map<PlayerID, string | null>
-    ready: {},
-    votes: {},
+    assignments: {},        // Map<PlayerID, string | null>
+    ready: {},              // DEAL: word seen
+    cardPlaced: {},         // DEAL: card placed (after word seen)
+    voteSelection: {},      // VOTE: pre-confirm Map<PlayerID, PlayerID[]>
+    votes: {},              // VOTE: confirmed Map<PlayerID, PlayerID[]>
     dealerGuess: null,
+    revealStartTime: null,
   };
 }
 

@@ -7,15 +7,30 @@ import { generateId } from "./session.js";
 import { render } from "./ui.js";
 import { createSync } from "./sync.js";
 
+/**
+ * DEV_MODE: localhost → each tab = separate player (fresh ID per load, instant LEAVE).
+ * Production: sticky playerId in localStorage, heartbeat-only departure.
+ */
+const DEV_MODE = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+
 const PLAYER_ID_KEY = "pic9upper-playerId";
 const SESSION_ID_KEY = "pic9upper-sessionId";
 const PLAYER_NAME_KEY = "pic9upper-playerName";
+const SESSION_SNAPSHOT_KEY = "pic9upper-session";
 
 function getPlayerId() {
-  // Always generate a fresh ID on page load so that refresh = disconnect.
-  // The old player ID gets removed via beforeunload LEAVE message.
-  const id = generateId();
-  sessionStorage.setItem(PLAYER_ID_KEY, id);
+  if (DEV_MODE) {
+    // Dev: fresh ID every load so each tab = separate player
+    const id = generateId();
+    sessionStorage.setItem(PLAYER_ID_KEY, id);
+    return id;
+  }
+  // Production: reuse ID from localStorage (survives refresh, shared across tabs)
+  let id = localStorage.getItem(PLAYER_ID_KEY);
+  if (!id) {
+    id = generateId();
+    localStorage.setItem(PLAYER_ID_KEY, id);
+  }
   return id;
 }
 
@@ -58,13 +73,39 @@ function main() {
     }
     if (ev?.type === "reset") {
       sessionStorage.removeItem(SESSION_ID_KEY);
+      localStorage.removeItem(SESSION_SNAPSHOT_KEY);
       history.replaceState(null, "", "/");
     }
   };
 
   const urlSessionId = getRoomIdFromPath();
-  const sync = createSync(game, playerId);
+  const sync = createSync(game, playerId, { devMode: DEV_MODE });
+
+  // Production: persist session snapshot so a solo-tab refresh can restore state
+  if (!DEV_MODE) {
+    game.subscribe((session) => {
+      if (session) {
+        localStorage.setItem(SESSION_SNAPSHOT_KEY, JSON.stringify(session));
+      } else {
+        localStorage.removeItem(SESSION_SNAPSHOT_KEY);
+      }
+    });
+  }
+
   sync.init(urlSessionId);
+
+  // Production: if no other tab responded with state, try restoring from localStorage
+  if (!DEV_MODE && !game.getSession() && urlSessionId) {
+    try {
+      const raw = localStorage.getItem(SESSION_SNAPSHOT_KEY);
+      if (raw) {
+        const snapshot = JSON.parse(raw);
+        if (snapshot && snapshot.id === urlSessionId && snapshot.players?.includes(playerId)) {
+          game.setSession(snapshot);
+        }
+      }
+    } catch { /* ignore corrupt data */ }
+  }
 
   const helpers = {
     getStoredPlayerName,
@@ -78,7 +119,7 @@ function main() {
     render(session, playerId, game, onAction, helpers);
   });
 
-  render(null, playerId, game, onAction, helpers);
+  render(game.getSession() ?? null, playerId, game, onAction, helpers);
 }
 
 function run() {

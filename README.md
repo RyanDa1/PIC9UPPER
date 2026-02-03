@@ -13,7 +13,9 @@ Then open http://localhost:3000
 - **Single-tab test:** Create room → "+ Add test player" → Start game → use "Dev:" buttons to advance phases
 - **Multi-tab test:** Create room in one tab (URL updates to `localhost:3000/{roomID}`), open that URL in other tabs to join
 - **Room URLs:** Creating or joining a room navigates to `/{roomID}`. Sharing the URL lets others join directly.
-- **Presence detection:** In the lobby, players who close their tab are removed instantly. Heartbeat fallback catches crashes (~10s). If the host leaves, the next player becomes host.
+- **Presence detection:** In the lobby, players who close their tab are removed instantly. Heartbeat fallback catches crashes (~10s). If the host leaves, the next player becomes host with full host privileges (Start, Add bot, pruning).
+- **Lobby UI:** Share link visible to all players (not just host). Room ID is hidden from the UI.
+- **Dev vs Production mode:** localhost runs in dev mode (fresh player ID per tab, instant leave on unload). Production uses sticky player IDs (localStorage) and heartbeat-only departure, so refreshing doesn't disconnect you.
 
 ## Deploy to Cloudflare Pages
 

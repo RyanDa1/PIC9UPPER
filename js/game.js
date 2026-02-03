@@ -15,6 +15,7 @@ export class GameManager {
   constructor() {
     this.session = null;
     this.listeners = [];
+    this.localOnly = false; // when true, notify() still fires but sync should skip broadcast
   }
 
   subscribe(fn) {
@@ -81,6 +82,14 @@ export class GameManager {
     this.notify();
   }
 
+  /** Host kicks a player from the lobby */
+  kickPlayer(targetPlayerId) {
+    if (!this.session || this.session.phase !== Phase.LOBBY) return false;
+    if (!this.session.players.includes(targetPlayerId)) return false;
+    this.leaveSession(targetPlayerId);
+    return true;
+  }
+
   startGame(playerId) {
     if (!this.session || this.session.phase !== Phase.LOBBY) return false;
     const count = this.session.players.length;
@@ -117,34 +126,46 @@ export class GameManager {
     return true;
   }
 
+  /** Player has seen their word — marks ready (stays in DEAL) */
   acknowledgeDeal(playerId) {
     if (!this.session || this.session.phase !== Phase.DEAL) return false;
     if (!this.session.players.includes(playerId)) return false;
 
     const ready = { ...this.session.ready, [playerId]: true };
-    const allAcknowledged = this.session.players.every((p) => ready[p]);
+    this.session = { ...this.session, ready };
+    this.notify();
+    return true;
+  }
+
+  /** Player has placed their card — when all non-dealer placed, transition to PLAY */
+  placeCard(playerId) {
+    if (!this.session || this.session.phase !== Phase.DEAL) return false;
+    if (!this.session.players.includes(playerId)) return false;
+
+    const cardPlaced = { ...(this.session.cardPlaced || {}), [playerId]: true };
+    const required = this.session.players.filter((p) => p !== this.session.dealerId);
+    const allPlaced = required.every((p) => cardPlaced[p]);
 
     this.session = {
       ...this.session,
-      ready: allAcknowledged ? {} : ready, // Clear ready when entering PLAY
-      phase: allAcknowledged ? Phase.PLAY : this.session.phase,
+      cardPlaced,
+      // Auto-transition to PLAY when all non-dealer cards are placed
+      phase: allPlaced ? Phase.PLAY : this.session.phase,
     };
     this.notify();
     return true;
   }
 
-  setReady(playerId) {
+  /** Host advances from PLAY to REVEAL (reveals the answer) */
+  advancePlay() {
     if (!this.session || this.session.phase !== Phase.PLAY) return false;
-    if (!this.session.players.includes(playerId)) return false;
-
-    const ready = { ...this.session.ready, [playerId]: true };
-    const required = this.session.players.filter((p) => p !== this.session.dealerId);
-    const allReady = required.every((p) => ready[p]);
 
     this.session = {
       ...this.session,
-      ready,
-      phase: allReady ? Phase.REVEAL : this.session.phase,
+      phase: Phase.REVEAL,
+      ready: {},
+      cardPlaced: {},
+      revealStartTime: Date.now(),
     };
     this.notify();
     return true;
@@ -156,45 +177,70 @@ export class GameManager {
     this.session = {
       ...this.session,
       phase: Phase.VOTE,
+      voteSelection: {},
+      votes: {},
+      dealerGuess: null,
     };
     this.notify();
     return true;
   }
 
-  vote(playerId, targetPlayerId) {
+  /** How many votes this player gets */
+  getVoteCount(playerId) {
+    if (!this.session) return 1;
+    const isHost = this.session.players[0] === playerId;
+    return isHost ? (this.session.hostVotes ?? 2) : (this.session.playerVotes ?? 1);
+  }
+
+  /** Toggle a vote target in/out of this player's local selection (NO broadcast) */
+  selectVote(playerId, targetPlayerId) {
     if (!this.session || this.session.phase !== Phase.VOTE) return false;
     if (!this.session.players.includes(playerId)) return false;
     if (!this.session.players.includes(targetPlayerId)) return false;
 
-    const votes = { ...this.session.votes, [playerId]: targetPlayerId };
-    this.session = { ...this.session, votes };
+    const current = [...(this.session.voteSelection?.[playerId] || [])];
+    const idx = current.indexOf(targetPlayerId);
+    const maxVotes = this.getVoteCount(playerId);
+
+    if (idx >= 0) {
+      // Deselect
+      current.splice(idx, 1);
+    } else if (current.length < maxVotes) {
+      // Add selection
+      current.push(targetPlayerId);
+    }
+    // If already at max and tapping a new target, ignore (must deselect first)
+
+    const voteSelection = { ...(this.session.voteSelection || {}), [playerId]: current };
+    this.session = { ...this.session, voteSelection };
+    // Local-only: re-render this tab but don't broadcast to other tabs
+    this.localOnly = true;
     this.notify();
+    this.localOnly = false;
     return true;
   }
 
-  dealerGuess(playerId, targetPlayerId) {
+  /** Player confirms their votes — when all confirmed, auto-transition to RESULT */
+  confirmVote(playerId) {
     if (!this.session || this.session.phase !== Phase.VOTE) return false;
-    if (playerId !== this.session.dealerId) return false;
-    if (!this.session.players.includes(targetPlayerId)) return false;
+    if (!this.session.players.includes(playerId)) return false;
+    const selections = this.session.voteSelection?.[playerId];
+    if (!selections || selections.length === 0) return false;
+    if (selections.length !== this.getVoteCount(playerId)) return false;
+
+    const votes = { ...this.session.votes, [playerId]: [...selections] };
+    // Dealer's first selection is their guess
+    const dealerGuess = playerId === this.session.dealerId
+      ? selections[0]
+      : this.session.dealerGuess;
+
+    const allVoted = this.session.players.every((p) => votes[p] != null);
 
     this.session = {
       ...this.session,
-      dealerGuess: targetPlayerId,
-    };
-    this.notify();
-    return true;
-  }
-
-  advanceToResult() {
-    if (!this.session || this.session.phase !== Phase.VOTE) return false;
-
-    const allVoted = this.session.players.every((p) => this.session.votes[p] != null);
-    const dealerGuessed = this.session.dealerGuess != null;
-    if (!allVoted || !dealerGuessed) return false;
-
-    this.session = {
-      ...this.session,
-      phase: Phase.RESULT,
+      votes,
+      dealerGuess,
+      phase: allVoted ? Phase.RESULT : this.session.phase,
     };
     this.notify();
     return true;
@@ -232,38 +278,23 @@ export class GameManager {
     return true;
   }
 
-  /** Dev: simulate all players acknowledged in DEAL */
-  devAllAcknowledged() {
-    if (!this.session || this.session.phase !== Phase.DEAL) return false;
-    const ready = {};
-    this.session.players.forEach((p) => { ready[p] = true; });
-    this.session = { ...this.session, ready, phase: Phase.PLAY };
-    this.notify();
-    return true;
-  }
-
-  /** Dev: simulate all non-dealer ready in PLAY */
-  devAllReady() {
-    if (!this.session || this.session.phase !== Phase.PLAY) return false;
-    const ready = { ...this.session.ready };
-    this.session.players.filter((p) => p !== this.session.dealerId).forEach((p) => { ready[p] = true; });
-    this.session = { ...this.session, ready, phase: Phase.REVEAL };
-    this.notify();
-    return true;
-  }
-
-  /** Dev: simulate all votes in VOTE */
+  /** Dev: simulate all votes in VOTE and transition to RESULT */
   devCompleteVotes() {
     if (!this.session || this.session.phase !== Phase.VOTE) return false;
     const votes = { ...this.session.votes };
     const candidates = this.session.players.filter((p) => p !== this.session.dealerId);
     this.session.players.forEach((p) => {
       if (!votes[p] && candidates.length > 0) {
-        votes[p] = candidates[Math.floor(Math.random() * candidates.length)];
+        const n = this.getVoteCount(p);
+        const picks = [];
+        for (let i = 0; i < n; i++) {
+          picks.push(candidates[Math.floor(Math.random() * candidates.length)]);
+        }
+        votes[p] = picks;
       }
     });
     const dealerGuess = this.session.dealerGuess ?? (candidates[0] ?? null);
-    this.session = { ...this.session, votes, dealerGuess, phase: Phase.RESULT };
+    this.session = { ...this.session, votes, dealerGuess, voteSelection: {}, phase: Phase.RESULT };
     this.notify();
     return true;
   }
