@@ -80,13 +80,21 @@ export function createSync(gameManager, playerId, opts = {}) {
     }
   }
 
-  /* ---- Broadcast (existing) ---- */
+  /* ---- Broadcast ---- */
   const broadcast = () => {
     if (suppressBroadcast) return;
     if (gameManager.localOnly) return; // skip broadcast for local-only changes (e.g. vote selection)
     const session = gameManager.getSession();
-    if (session) {
+    if (!session) return;
+
+    const isHost = session.players[0] === playerId;
+
+    if (session.phase === "LOBBY" || isHost) {
+      // Host always broadcasts full state; in LOBBY everyone can (join/leave need it)
       channel.postMessage({ type: "STATE", session });
+    } else {
+      // Non-host after LOBBY: send lightweight ACTION so host can apply & rebroadcast
+      channel.postMessage({ type: "ACTION", playerId, session });
     }
   };
 
@@ -112,6 +120,30 @@ export function createSync(gameManager, playerId, opts = {}) {
       suppressBroadcast = true;
       gameManager.setSession(incoming);
       suppressBroadcast = false;
+    }
+    // Host receives ACTION from non-host: apply their state changes and rebroadcast
+    if (e.data?.type === "ACTION" && e.data?.session && e.data?.playerId) {
+      const current = gameManager.getSession();
+      if (!current) return;
+      if (current.id !== e.data.session.id) return;
+      if (current.players[0] !== playerId) return; // only host processes actions
+
+      const incoming = e.data.session;
+      // Merge: keep host's players array (authoritative), take incoming phase + data maps
+      const merged = {
+        ...incoming,
+        players: [...current.players],           // host's player order is authoritative
+        playerNames: { ...current.playerNames },  // preserve names
+      };
+      // Preserve host's own local vote selection
+      if (merged.phase === "VOTE" && current.voteSelection?.[playerId]) {
+        merged.voteSelection = { ...merged.voteSelection, [playerId]: current.voteSelection[playerId] };
+      }
+      suppressBroadcast = true;
+      gameManager.setSession(merged);
+      suppressBroadcast = false;
+      // Host rebroadcasts the merged authoritative state
+      channel.postMessage({ type: "STATE", session: gameManager.getSession() });
     }
     if (e.data?.type === "NEED_STATE") {
       const session = gameManager.getSession();
