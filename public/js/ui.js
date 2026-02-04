@@ -381,6 +381,9 @@ function attachListeners(root, playerId, sendAction, helpers = {}) {
         }
 
         case "join-by-id": {
+          const nameInput = document.getElementById("player-name");
+          const name = nameInput?.value?.trim() ?? "";
+          if (name) helpers.setStoredPlayerName?.(name);
           const roomInput = document.getElementById("room-id");
           const roomId = roomInput?.value?.trim() ?? "";
           if (roomId) {

@@ -76,6 +76,12 @@ export class GameRoom {
       this.sockets.delete(server);
     });
 
+    // If a session already exists, send current state to the new connection
+    // so visitors see the join form (or game state) immediately
+    if (this.session) {
+      this.send(server, { type: "state", session: this.session });
+    }
+
     return new Response(null, { status: 101, webSocket: client });
   }
 
