@@ -13,6 +13,6 @@
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_classes": ["GameRoom"] }
+    { "tag": "v1", "new_sqlite_classes": ["GameRoom"] }
   ]
 }
