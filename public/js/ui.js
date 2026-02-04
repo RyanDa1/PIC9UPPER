@@ -1,6 +1,7 @@
 /**
  * UI - fully derived from session.phase + playerId + assignments[playerId]
  * No separate frontend state machine.
+ * All actions go through sendAction() → WebSocket → server.
  */
 
 import { Phase, getPlayerAssignment, getPlayerName, isHostPlayer, MIN_PLAYERS, MAX_PLAYERS } from "./session.js";
@@ -13,13 +14,13 @@ let wordVisible = false;
 // Tracks whether the player has seen their word at least once (enables "I've placed my card")
 let wordSeenOnce = false;
 
-export function render(session, playerId, game, onAction, helpers = {}) {
+export function render(session, playerId, sendAction, helpers = {}) {
   const root = document.getElementById("app");
   if (!root) return;
 
   if (!session) {
     root.innerHTML = renderHome(helpers);
-    attachListeners(root, game, playerId, onAction, helpers);
+    attachListeners(root, playerId, sendAction, helpers);
     return;
   }
 
@@ -42,53 +43,49 @@ export function render(session, playerId, game, onAction, helpers = {}) {
   let screenHtml;
   switch (phase) {
     case Phase.LOBBY:
-      screenHtml = renderLobby(session, playerId, helpers);
+      screenHtml = renderLobby(session, playerId, sendAction, helpers);
       break;
     case Phase.DEAL:
       screenHtml = renderDeal(session, playerId, assignment);
       break;
     case Phase.PLAY:
-      screenHtml = renderPlay(session, playerId, helpers);
+      screenHtml = renderPlay(session, playerId);
       break;
     case Phase.REVEAL:
-      screenHtml = renderReveal(session, playerId, helpers);
+      screenHtml = renderReveal(session, playerId);
       break;
     case Phase.VOTE:
-      screenHtml = renderVote(session, playerId, helpers);
+      screenHtml = renderVote(session, playerId);
       break;
     case Phase.RESULT:
-      screenHtml = renderResult(session, playerId, helpers);
+      screenHtml = renderResult(session, playerId);
       break;
     default:
       screenHtml = `<div class="screen"><p>Unknown phase: ${phase}</p></div>`;
   }
 
   root.innerHTML = homeBtn + screenHtml;
-  attachListeners(root, game, playerId, onAction, helpers);
+  attachListeners(root, playerId, sendAction, helpers);
 
-  // Start countdown timer for REVEAL phase (only while counting down)
+  // Start countdown timer for REVEAL phase
   if (phase === Phase.REVEAL && session.revealStartTime && !revealTimerId) {
-    const elapsed = session.revealStartTime ? (Date.now() - session.revealStartTime) / 1000 : REVEAL_COUNTDOWN_SEC;
+    const elapsed = (Date.now() - session.revealStartTime) / 1000;
     const alreadyDone = Math.max(0, REVEAL_COUNTDOWN_SEC - Math.floor(elapsed)) <= 0;
-    // Only start interval if countdown is still active — once done, no more ticking needed
     if (!alreadyDone) {
       revealTimerId = setInterval(() => {
-        const currentSession = game.getSession();
-        if (!currentSession || currentSession.phase !== Phase.REVEAL) {
+        if (!session || session.phase !== Phase.REVEAL) {
           clearInterval(revealTimerId);
           revealTimerId = null;
           return;
         }
-        const remaining = Math.max(0, REVEAL_COUNTDOWN_SEC - Math.floor((Date.now() - currentSession.revealStartTime) / 1000));
+        const remaining = Math.max(0, REVEAL_COUNTDOWN_SEC - Math.floor((Date.now() - session.revealStartTime) / 1000));
         const el = document.getElementById("reveal-countdown");
-        if (el) {
-          el.textContent = remaining;
-        }
+        if (el) el.textContent = remaining;
         if (remaining <= 0) {
           clearInterval(revealTimerId);
           revealTimerId = null;
-          // One final re-render to swap countdown for host button / storytelling prompt
-          render(currentSession, playerId, game, onAction, helpers);
+          // Re-render to swap countdown for host button / storytelling prompt
+          render(session, playerId, sendAction, helpers);
         }
       }, 500);
     }
@@ -97,7 +94,7 @@ export function render(session, playerId, game, onAction, helpers = {}) {
 
 function renderHome(helpers) {
   const storedName = helpers.getStoredPlayerName?.() ?? "";
-  const urlSessionId = helpers.urlSessionId ?? "";
+  const urlRoomId = location.pathname.replace(/^\/+|\/+$/g, "") || "";
 
   return `
     <div class="screen lobby home">
@@ -119,16 +116,16 @@ function renderHome(helpers) {
 
       <div class="form-group">
         <label for="room-id">Room ID</label>
-        <input type="text" id="room-id" class="input input-room" placeholder="Enter room ID to join" value="${escapeHtml(urlSessionId)}" />
+        <input type="text" id="room-id" class="input input-room" placeholder="Enter room ID to join" value="${escapeHtml(urlRoomId)}" />
       </div>
       <button class="btn secondary" data-action="join-by-id">Join room</button>
     </div>
   `;
 }
 
-function renderLobby(session, playerId, helpers) {
+function renderLobby(session, playerId, sendAction, helpers) {
   const isInLobby = session.players.includes(playerId);
-  const iAmHost = !!helpers.getIsHost?.();
+  const iAmHost = isHostPlayer(session, playerId);
   const count = session.players.length;
   const canStart = iAmHost && count >= MIN_PLAYERS && count <= MAX_PLAYERS;
   const joinUrl = helpers.getJoinUrl?.(session.id) ?? "";
@@ -150,7 +147,7 @@ function renderLobby(session, playerId, helpers) {
   }
 
   const playerCountHint = count < MIN_PLAYERS
-    ? `Need ${MIN_PLAYERS - count} more to start (${MIN_PLAYERS}–${MAX_PLAYERS} players)`
+    ? `Need ${MIN_PLAYERS - count} more to start (${MIN_PLAYERS}\u2013${MAX_PLAYERS} players)`
     : count > MAX_PLAYERS
       ? `Too many players (max ${MAX_PLAYERS})`
       : `Ready to start (${count} players)`;
@@ -226,10 +223,9 @@ function renderDeal(session, playerId, assignment) {
   `;
 }
 
-function renderPlay(session, playerId, helpers) {
-  const iAmHost = !!helpers.getIsHost?.();
+function renderPlay(session, playerId) {
+  const iAmHost = isHostPlayer(session, playerId);
 
-  // Host: reveal the word button
   if (iAmHost) {
     return `
       <div class="screen play">
@@ -239,7 +235,6 @@ function renderPlay(session, playerId, helpers) {
     `;
   }
 
-  // Other players: waiting for host to reveal
   return `
     <div class="screen play">
       <p class="phase-hint">Waiting for other players...</p>
@@ -247,8 +242,8 @@ function renderPlay(session, playerId, helpers) {
   `;
 }
 
-function renderReveal(session, playerId, helpers) {
-  const iAmHost = !!helpers.getIsHost?.();
+function renderReveal(session, playerId) {
+  const iAmHost = isHostPlayer(session, playerId);
   const elapsed = session.revealStartTime ? (Date.now() - session.revealStartTime) / 1000 : REVEAL_COUNTDOWN_SEC;
   const remaining = Math.max(0, REVEAL_COUNTDOWN_SEC - Math.floor(elapsed));
   const countdownDone = remaining <= 0;
@@ -274,10 +269,9 @@ function renderReveal(session, playerId, helpers) {
   `;
 }
 
-function renderVote(session, playerId, helpers) {
+function renderVote(session, playerId) {
   const hasVoted = session.votes[playerId] != null;
 
-  // After confirming: waiting screen
   if (hasVoted) {
     return `
       <div class="screen vote">
@@ -286,15 +280,14 @@ function renderVote(session, playerId, helpers) {
     `;
   }
 
-  // Candidates: everyone except yourself (dealer sees all non-dealer players including host)
   const isDealer = playerId === session.dealerId;
   const candidates = isDealer
     ? session.players.filter((p) => p !== session.dealerId)
     : session.players.filter((p) => p !== playerId && p !== session.dealerId);
 
   const selections = session.voteSelection?.[playerId] || [];
-  const iAmHost = !!helpers.getIsHost?.();
-  const maxVotes = iAmHost ? (session.hostVotes ?? 2) : (session.playerVotes ?? 1);
+  const host = isHostPlayer(session, playerId);
+  const maxVotes = host ? (session.hostVotes ?? 2) : (session.playerVotes ?? 1);
   const canConfirm = selections.length === maxVotes;
 
   const prompt = isDealer
@@ -321,10 +314,9 @@ function renderVote(session, playerId, helpers) {
   `;
 }
 
-function renderResult(session, playerId, helpers) {
-  const iAmHost = !!helpers.getIsHost?.();
+function renderResult(session, playerId) {
+  const iAmHost = isHostPlayer(session, playerId);
 
-  // Count votes: each entry in a player's vote array = 1 point for the target
   function countVotes(targetId) {
     let total = 0;
     for (const picks of Object.values(session.votes)) {
@@ -345,7 +337,7 @@ function renderResult(session, playerId, helpers) {
     isDealer: p === session.dealerId,
   }));
 
-  const dealerGuessName = session.dealerGuess ? getPlayerName(session, session.dealerGuess) : "—";
+  const dealerGuessName = session.dealerGuess ? getPlayerName(session, session.dealerGuess) : "\u2014";
   const hostVotes = session.hostVotes ?? 2;
   const playerVotes = session.playerVotes ?? 1;
 
@@ -361,13 +353,13 @@ function renderResult(session, playerId, helpers) {
         `).join("")}
       </div>
       <p class="dealer-guess">Dealer guessed: ${escapeHtml(dealerGuessName)}</p>
-      <p class="hint">Host: ${hostVotes} vote${hostVotes !== 1 ? "s" : ""} · Player: ${playerVotes} vote${playerVotes !== 1 ? "s" : ""}</p>
+      <p class="hint">Host: ${hostVotes} vote${hostVotes !== 1 ? "s" : ""} \u00B7 Player: ${playerVotes} vote${playerVotes !== 1 ? "s" : ""}</p>
       ${iAmHost ? '<button class="btn primary" data-action="reset">Next round</button>' : ""}
     </div>
   `;
 }
 
-function attachListeners(root, game, playerId, onAction, helpers = {}) {
+function attachListeners(root, playerId, sendAction, helpers = {}) {
   root.querySelectorAll("[data-action]").forEach((el) => {
     el.addEventListener("click", (e) => {
       const action = el.dataset.action;
@@ -375,91 +367,89 @@ function attachListeners(root, game, playerId, onAction, helpers = {}) {
 
       switch (action) {
         case "go-home":
-          game.clearSession();
-          onAction?.({ type: "reset" });
+          helpers.goHome?.();
           break;
+
         case "create": {
           const nameInput = document.getElementById("player-name");
           const name = nameInput?.value?.trim() ?? "";
           helpers.setStoredPlayerName?.(name);
-          game.createSession(playerId, name);
-          onAction?.({ type: "create", session: game.getSession() });
+          // Generate room ID client-side, connect WebSocket with pending create action
+          const roomId = helpers.generateRoomId?.() ?? Math.random().toString(36).slice(2, 11);
+          helpers.connectToRoom?.(roomId, { type: "create", playerName: name });
           break;
         }
+
         case "join-by-id": {
           const roomInput = document.getElementById("room-id");
           const roomId = roomInput?.value?.trim() ?? "";
-          if (roomId) helpers.requestSession?.(roomId);
+          if (roomId) {
+            // Navigate to the room URL (which triggers connectToRoom in app.js)
+            history.replaceState(null, "", `/${roomId}`);
+            helpers.connectToRoom?.(roomId);
+          }
           break;
         }
+
         case "join": {
           const nameInput = document.getElementById("join-name");
           const name = nameInput?.value?.trim() ?? "";
           helpers.setStoredPlayerName?.(name);
-          const session = game.getSession();
-          if (session) {
-            const result = onAction?.({ type: "join", sessionId: session.id, playerId, playerName: name });
-            // Show inline error if join was rejected
-            const errEl = document.getElementById("join-error");
-            if (result === "duplicate_name") {
-              if (errEl) { errEl.textContent = "That name is already taken."; errEl.style.display = ""; }
-            } else if (errEl) {
-              errEl.style.display = "none";
-            }
-          }
+          sendAction({ type: "join", playerId, playerName: name });
           break;
         }
+
         case "kick":
-          if (target) game.kickPlayer(target);
+          if (target) sendAction({ type: "kick", targetId: target });
           break;
+
         case "start":
-          game.startGame(playerId);
-          onAction?.({ type: "start" });
+          sendAction({ type: "start" });
           break;
+
         case "toggle-word":
           wordVisible = !wordVisible;
-          // First time seeing the word: acknowledge + enable button
           if (!wordSeenOnce) {
             wordSeenOnce = true;
-            game.acknowledgeDeal(playerId);
-            onAction?.({ type: "acknowledge" });
-          } else {
-            render(game.getSession(), playerId, game, onAction, helpers);
+            sendAction({ type: "acknowledgeDeal" });
           }
+          // Re-render to show/hide word (local UI state)
+          // The acknowledgeDeal will also trigger a state update from server
+          // but we do a local re-render immediately for responsiveness
+          root.querySelector(".scratch-card")?.classList.toggle("revealed", wordVisible);
           break;
+
         case "acknowledge-place":
-          game.placeCard(playerId);
-          onAction?.({ type: "placeCard" });
+          sendAction({ type: "placeCard" });
           break;
+
         case "advance-play":
-          game.advancePlay();
-          onAction?.({ type: "advancePlay" });
+          sendAction({ type: "advancePlay" });
           break;
+
         case "advance-reveal":
-          game.advanceReveal();
-          onAction?.({ type: "advanceReveal" });
+          sendAction({ type: "advanceReveal" });
           break;
+
         case "select-vote":
-          if (target) {
-            game.selectVote(playerId, target, !!helpers.getIsHost?.());
-            onAction?.({ type: "selectVote", target });
-          }
+          if (target) sendAction({ type: "selectVote", targetId: target });
           break;
+
         case "confirm-vote":
-          game.confirmVote(playerId, !!helpers.getIsHost?.());
-          onAction?.({ type: "confirmVote" });
+          sendAction({ type: "confirmVote" });
           break;
+
         case "reset":
-          game.resetSession();
-          onAction?.({ type: "nextRound" });
+          sendAction({ type: "nextRound" });
           break;
+
         case "add-bot":
-          game.addBot();
-          onAction?.({ type: "addBot" });
+          sendAction({ type: "addBot" });
           break;
+
         case "copy-link": {
-          const session = game.getSession();
-          const url = session ? helpers.getJoinUrl?.(session.id) : "";
+          const shareInput = root.querySelector(".input-share");
+          const url = shareInput?.value ?? "";
           if (url) navigator.clipboard?.writeText(url);
           break;
         }
