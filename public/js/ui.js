@@ -16,7 +16,7 @@ let revealTimerId = null;
 // Local UI state: tracks whether the word box is currently showing the word (toggle)
 let wordVisible = false;
 // Tracks whether the player has seen their word at least once (enables "I've placed my card")
-let wordSeenOnce = false;
+let wordSeenOnce = true;
 
 export function render(session, playerId, sendAction, helpers = {}) {
   const root = document.getElementById("app");
