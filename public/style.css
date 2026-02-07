@@ -283,19 +283,6 @@ main {
   color: #64748b;
 }
 
-.result-card.you {
-  border: 1px solid #475569;
-}
-
-.result-card.dealer {
-  opacity: 0.7;
-}
-
-.dealer-guess {
-  font-size: 0.9rem;
-  color: #94a3b8;
-}
-
 /* ---- Kick button in player tags ---- */
 .player-tag {
   position: relative;
@@ -417,4 +404,530 @@ main {
   font-variant-numeric: tabular-nums;
   line-height: 1;
   margin: 0.5rem 0;
+}
+
+/* ---- Seat Grid (Lobby) ---- */
+.seats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 0.5rem;
+  width: 100%;
+  margin: 0.75rem 0;
+}
+
+.seat {
+  padding: 0.75rem 0.5rem;
+  border-radius: 10px;
+  text-align: center;
+  transition: all 0.2s;
+  position: relative;
+  min-height: 70px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.seat.empty {
+  background: rgba(30, 41, 59, 0.5);
+  border: 2px dashed #475569;
+  opacity: 0.6;
+}
+
+.seat.occupied {
+  background: #1e293b;
+  border: 2px solid #475569;
+}
+
+.seat.occupied.you {
+  border-color: #3b82f6;
+  background: #1e3a5f;
+}
+
+.seat-number {
+  font-size: 0.7rem;
+  color: #64748b;
+  margin-bottom: 0.2rem;
+}
+
+.seat-name {
+  font-size: 0.85rem;
+  font-weight: 500;
+  word-break: break-word;
+  line-height: 1.2;
+}
+
+.seat-placeholder {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.seat .btn-kick {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+
+/* ---- Config Panel (Host Only) ---- */
+.config-panel {
+  width: 100%;
+  background: #1e293b;
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  text-align: left;
+}
+
+.config-panel h3 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9rem;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.config-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+
+.config-row label {
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  min-width: 80px;
+}
+
+.config-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  max-width: 160px;
+}
+
+.config-control .slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: #334155;
+  cursor: pointer;
+}
+
+.config-control .slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+}
+
+.config-control .slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+  border: none;
+}
+
+.config-control .numeric {
+  width: 45px;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.85rem;
+  text-align: center;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #f8fafc;
+}
+
+.config-control .numeric:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.config-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #334155;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+
+.toggle-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+
+/* ---- Role Colors ---- */
+.role-dealer {
+  background: #1f2937 !important;
+  border-color: #4b5563 !important;
+}
+
+.role-civilian {
+  background: #064e3b !important;
+  border-color: #10b981 !important;
+}
+
+.role-undercover {
+  background: #7f1d1d !important;
+  border-color: #ef4444 !important;
+}
+
+.role-blank {
+  background: #374151 !important;
+  border-color: #9ca3af !important;
+}
+
+/* ---- Role Badge ---- */
+.role-badge {
+  display: inline-block;
+  padding: 0.5rem 1.25rem;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #f8fafc;
+  margin-bottom: 0.5rem;
+}
+
+.role-badge.role-dealer {
+  background: #1f2937;
+  border: 2px solid #4b5563;
+}
+
+/* ---- Enhanced Result Cards ---- */
+/* (Main result-card styles defined below in "New result layout styles") */
+
+.role-badge-small {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #f8fafc;
+}
+
+.result-summary {
+  margin-top: 0.75rem;
+  text-align: center;
+}
+
+.result-summary .correct-word {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #10b981;
+  margin: 0.25rem 0;
+}
+
+
+.result-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.result-actions .btn {
+  min-width: 120px;
+}
+
+/* Leaderboard */
+.leaderboard {
+  width: 100%;
+  margin-top: 1.5rem;
+  background: #1e293b;
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.leaderboard h3 {
+  font-size: 1rem;
+  color: #94a3b8;
+  margin: 0 0 0.75rem 0;
+  text-align: center;
+}
+
+.leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.leaderboard-table th {
+  color: #64748b;
+  font-weight: 500;
+  padding: 0.5rem 0.25rem;
+  border-bottom: 1px solid #334155;
+  text-align: center;
+}
+
+.leaderboard-table td {
+  padding: 0.6rem 0.25rem;
+  border-bottom: 1px solid #334155;
+  text-align: center;
+  color: #cbd5e1;
+}
+
+.leaderboard-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.leaderboard-table tr.you td {
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.leaderboard-table .col-rank {
+  width: 50px;
+}
+
+.leaderboard-table .col-name {
+  text-align: left;
+  padding-left: 0.5rem;
+}
+
+.leaderboard-table .col-round {
+  width: 60px;
+}
+
+.leaderboard-table .col-total {
+  width: 60px;
+  font-weight: 600;
+}
+
+.leaderboard-table .round-score {
+  color: #10b981;
+  font-weight: 500;
+}
+
+/* New result layout styles */
+.result-groups {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.role-group {
+  width: 100%;
+}
+
+.role-group-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-bottom: 0.5rem;
+  text-align: left;
+  padding-left: 0.5rem;
+  border-left: 3px solid #475569;
+}
+
+.role-group-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+  justify-items: center;
+}
+
+.result-card {
+  width: 100%;
+  max-width: 110px;
+  padding: 0.5rem;
+  border-radius: 8px;
+  text-align: center;
+  background: #1e293b;
+}
+
+.result-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.result-header .player-name {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: #f8fafc;
+}
+
+.result-header .score-badges {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.score-gain {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+}
+
+.score-gain.player {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+}
+
+.score-gain.dealer {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+.result-word {
+  font-size: 0.95rem;
+  font-weight: 500;
+  margin: 0.35rem 0;
+  padding: 0.2rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.result-voters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.35rem;
+}
+
+.voter-box-large {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  background: transparent;
+  border: 1px solid #334155;
+}
+
+.voter-box-large.dealer-vote {
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid #fbbf24;
+}
+
+.voter-box-large .voter-score {
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-left: 0.5rem;
+}
+
+.voter-box-large .voter-score.player {
+  color: #10b981;
+}
+
+.voter-box-large .voter-name {
+  font-size: 0.7rem;
+  color: #cbd5e1;
+}
+
+.no-votes {
+  font-size: 0.75rem;
+  color: #64748b;
+  font-style: italic;
+}
+
+/* Dealer summary in result */
+.dealer-summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.dealer-label {
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+/* Config panel header with advanced button */
+.config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.config-header h3 {
+  margin: 0;
+}
+
+.btn-text {
+  background: none;
+  border: none;
+  color: #60a5fa;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.btn-text:hover {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+/* Advanced settings */
+.advanced-settings {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #334155;
+}
+
+.advanced-settings h4 {
+  font-size: 0.9rem;
+  color: #94a3b8;
+  margin: 0 0 0.75rem 0;
+}
+
+.scoring-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.scoring-rule {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+}
+
+.scoring-rule label {
+  flex: 1;
+  text-align: left;
+}
+
+.scoring-input {
+  width: 50px;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  background: #1e293b;
+  color: #f8fafc;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.scoring-rule span {
+  color: #64748b;
 }

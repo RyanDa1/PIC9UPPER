@@ -14,5 +14,8 @@
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["GameRoom"] }
+  ],
+  "rules": [
+    { "type": "Text", "globs": ["**/*.txt"], "fallthrough": true }
   ]
 }
