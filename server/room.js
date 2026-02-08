@@ -11,7 +11,7 @@ import {
 
 import { selectWordGroup, getUndercoverWords } from "./words.js";
 
-const INACTIVITY_MS = 30 * 60 * 1000; // 30 minutes
+const INACTIVITY_MS = 5 * 60 * 1000; // 5 minutes - cleanup after all connections close
 
 /* ------------------------------------------------------------------ */
 /*  Helper: check if playerId is the host                             */
@@ -133,8 +133,15 @@ export class GameRoom {
   }
 
   async alarm() {
+    // Cleanup when no active connections after timeout
     if (!this.sockets || this.sockets.size === 0) {
+      console.log(`Room ${this.session?.id || "unknown"} cleanup: no active connections, clearing session`);
       this.session = null;
+      // Clear any persisted storage to free resources
+      await this.state.storage.deleteAll();
+    } else {
+      // Still have connections, cancel cleanup
+      console.log(`Room ${this.session?.id || "unknown"} alarm: ${this.sockets.size} connections still active`);
     }
   }
 
