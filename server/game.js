@@ -30,6 +30,14 @@ export function getVoteCount(session, playerId) {
   return isDealer ? 2 : 1;
 }
 
+/** Check if a player can vote for blank in this game */
+export function canVoteBlank(session, playerId) {
+  const config = session.config || {};
+  if (config.blankCount <= 0) return false;
+  if (session.dealerId && playerId === session.dealerId) return !!config.dealerCanVoteBlank;
+  return !!config.playerCanVoteBlank;
+}
+
 /** Who can press phase-advancement buttons (reveal word, start voting) */
 function canAdvancePhase(session, playerId) {
   if (session.dealerId) return playerId === session.dealerId;
@@ -191,6 +199,8 @@ export function handleAdvanceReveal(session, playerId) {
     phase: Phase.VOTE,
     voteSelection: {},
     votes: {},
+    blankVoteSelection: {},
+    blankVotes: {},
     dealerGuess: null,
   };
 
@@ -224,6 +234,24 @@ export function handleSelectVote(session, playerId, targetId) {
   };
 }
 
+export function handleSelectBlankVote(session, playerId, targetId) {
+  if (!session || session.phase !== Phase.VOTE) return { error: { code: "invalid", message: "Not in VOTE phase" } };
+  if (!session.players.includes(playerId)) return { error: { code: "invalid", message: "Player not in room" } };
+  if (!canVoteBlank(session, playerId)) return { error: { code: "invalid", message: "Blank voting not enabled" } };
+  if (!targetId || !session.players.includes(targetId)) return { error: { code: "invalid", message: "Invalid target" } };
+
+  const current = session.blankVoteSelection?.[playerId] ?? null;
+  // Toggle: click same target to deselect, click different to switch
+  const newSelection = current === targetId ? null : targetId;
+
+  return {
+    session: {
+      ...session,
+      blankVoteSelection: { ...(session.blankVoteSelection || {}), [playerId]: newSelection },
+    },
+  };
+}
+
 export function handleConfirmVote(session, playerId) {
   if (!session || session.phase !== Phase.VOTE) return { error: { code: "invalid", message: "Not in VOTE phase" } };
   if (!session.players.includes(playerId)) return { error: { code: "invalid", message: "Player not in room" } };
@@ -232,17 +260,35 @@ export function handleConfirmVote(session, playerId) {
   const maxVotes = getVoteCount(session, playerId);
   if (selections.length !== maxVotes) return { error: { code: "invalid", message: "Wrong number of selections" } };
 
+  // If player has blank vote rights, they must also have selected a blank vote
+  const needsBlankVote = canVoteBlank(session, playerId);
+  const blankSelection = session.blankVoteSelection?.[playerId] ?? null;
+  if (needsBlankVote && blankSelection == null) {
+    return { error: { code: "invalid", message: "Must also select a blank vote" } };
+  }
+
   const votes = { ...session.votes, [playerId]: [...selections] };
+  const blankVotes = { ...session.blankVotes };
+  if (needsBlankVote) {
+    blankVotes[playerId] = blankSelection;
+  }
+
   const dealerGuess = playerId === session.dealerId
     ? selections[0]
     : session.dealerGuess;
 
-  const allVoted = session.players.every((p) => votes[p] != null);
+  // Check if all players have completed voting (including blank votes if required)
+  const allVoted = session.players.every((p) => {
+    if (votes[p] == null) return false;
+    if (canVoteBlank(session, p) && blankVotes[p] == null) return false;
+    return true;
+  });
 
   return {
     session: {
       ...session,
       votes,
+      blankVotes,
       dealerGuess,
       phase: allVoted ? Phase.RESULT : session.phase,
     },
@@ -390,6 +436,7 @@ export function calculateRoundScores(session) {
     roundScores[p] = 0;
   }
 
+  // Score normal votes (correct-word guessing)
   for (const [voterId, picks] of Object.entries(session.votes || {})) {
     if (!Array.isArray(picks)) continue;
     const voterIsDealer = voterId === dealerId;
@@ -411,6 +458,32 @@ export function calculateRoundScores(session) {
           roundScores[voterId] = (roundScores[voterId] || 0) + (scoring.playerCorrectCivilian || 1);
         }
         roundScores[targetId] = (roundScores[targetId] || 0) + (scoring.receivedVote || 1);
+      }
+    }
+  }
+
+  // Score blank votes
+  const blankVotedTargets = new Set(); // track which blanks were guessed
+  for (const [voterId, targetId] of Object.entries(session.blankVotes || {})) {
+    if (targetId == null) continue;
+    const targetRole = session.roles?.[targetId];
+    if (targetRole === Role.BLANK) {
+      blankVotedTargets.add(targetId);
+      const voterIsDealer = voterId === dealerId;
+      if (voterIsDealer) {
+        roundScores[voterId] = (roundScores[voterId] || 0) + (scoring.dealerCorrectBlank || 3);
+      } else {
+        roundScores[voterId] = (roundScores[voterId] || 0) + (scoring.playerCorrectBlank || 3);
+      }
+    }
+  }
+
+  // Blank escape scoring: blanks not targeted by any blank vote
+  const hasAnyBlankVotes = Object.keys(session.blankVotes || {}).length > 0;
+  if (hasAnyBlankVotes) {
+    for (const p of session.players) {
+      if (session.roles?.[p] === Role.BLANK && !blankVotedTargets.has(p)) {
+        roundScores[p] = (roundScores[p] || 0) + (scoring.blankEscape || 3);
       }
     }
   }
@@ -448,6 +521,8 @@ export function doBotActions(session) {
   if (s.phase === Phase.VOTE) {
     const votes = { ...s.votes };
     const voteSelection = { ...(s.voteSelection || {}) };
+    const blankVotes = { ...(s.blankVotes || {}) };
+    const blankVoteSelection = { ...(s.blankVoteSelection || {}) };
     for (const bot of bots) {
       if (votes[bot] != null) continue;
       const isBotDealer = bot === s.dealerId;
@@ -460,12 +535,23 @@ export function doBotActions(session) {
       const picks = shuffled.slice(0, maxVotes);
       voteSelection[bot] = picks;
       votes[bot] = picks;
+
+      // Bot blank vote (random pick from candidates)
+      if (canVoteBlank(s, bot)) {
+        const blankPick = candidates[Math.floor(Math.random() * candidates.length)];
+        blankVoteSelection[bot] = blankPick;
+        blankVotes[bot] = blankPick;
+      }
     }
     const dealerGuess = s.dealerId && votes[s.dealerId]
       ? votes[s.dealerId][0]
       : s.dealerGuess;
-    const allVoted = s.players.every((p) => votes[p] != null);
-    s = { ...s, votes, voteSelection, dealerGuess, phase: allVoted ? Phase.RESULT : s.phase };
+    const allVoted = s.players.every((p) => {
+      if (votes[p] == null) return false;
+      if (canVoteBlank(s, p) && blankVotes[p] == null) return false;
+      return true;
+    });
+    s = { ...s, votes, voteSelection, blankVotes, blankVoteSelection, dealerGuess, phase: allVoted ? Phase.RESULT : s.phase };
   }
 
   return s;

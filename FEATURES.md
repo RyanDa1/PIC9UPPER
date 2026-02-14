@@ -183,3 +183,11 @@ No implicit loops.
   - The host takes over phase-advancement duties: "揭示词语" button in PLAY phase, "开始投票" button in REVEAL phase.
   - Result screen shows all players as role cards (no one excluded). Scoring uses only non-dealer rules (playerCorrectCivilian, receivedVote).
   - Setting persists across rounds via config.
+- **Blank voting (白板投票)** — Optional feature allowing players to guess who is the blank player, in parallel with the normal correct-word vote.
+  - **Config**: Two toggles in advanced settings: "庄家可选白板" (dealer can vote blank, only when dealer exists) and "玩家可选白板" (player can vote blank). Both default OFF.
+  - **Scoring**: Three new scoring rules (conditional visibility based on toggle state): "庄家选对白板" (dealer scores for correct blank guess, default 3), "玩家选对白板" (player scores for correct blank guess, default 3), "白板逃脱" (blank scores if no one guessed them, default 3). Each rule only appears when the relevant toggle is on.
+  - **Vote phase**: When enabled, players see an additional "谁是白板？" section below the normal vote section. One blank vote per player (fixed 1 pick). Both sections must be completed before the unified "投票" confirm button activates.
+  - **Result phase**: When blank voting was active, result cards widen and the voter area splits in two columns — left for normal votes, right for blank votes. Blank votes have a flag (⚑) marker and subtle fill to visually distinguish them. Blank escape is shown as a special dashed tag with score when a blank player was not guessed by anyone.
+  - **Escape logic**: A blank player "escapes" if no blank vote points at them. Each blank is judged independently (some may escape, others may not). Escape score is awarded per-blank.
+  - Automatically hidden if `blankCount === 0` even when toggles are on.
+  - Bots auto-select random blank votes when enabled.

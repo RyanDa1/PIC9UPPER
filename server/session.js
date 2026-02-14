@@ -40,6 +40,9 @@ export const DEFAULT_SCORING = {
   blankFromDealer: 3,            // 庄家投错白板，白板得分
   playerCorrectCivilian: 1,      // 玩家投对平民，投票者得分
   receivedVote: 1,               // 被其他玩家投票（无论对错），被投者得分
+  dealerCorrectBlank: 3,         // 庄家选对白板，庄家得分
+  playerCorrectBlank: 1,         // 玩家选对白板，投票者得分
+  blankEscape: 3,                // 白板逃脱，白板得分
 };
 
 /** Generate default room configuration for given capacity */
@@ -55,6 +58,8 @@ export function getDefaultConfig(capacity = 6, dealerCount = 1) {
     blankCount,
     dealerRotation: false,
     differentUndercoverWords: false,
+    dealerCanVoteBlank: false,
+    playerCanVoteBlank: false,
     revealCountdown: 15,
     scoring: { ...DEFAULT_SCORING },
   };
@@ -116,6 +121,8 @@ export function createSession(id = generateId(), capacity = 6) {
     cardPlaced: {},         // DEAL: card placed (after word seen)
     voteSelection: {},      // VOTE: pre-confirm Map<PlayerID, PlayerID[]>
     votes: {},              // VOTE: confirmed Map<PlayerID, PlayerID[]>
+    blankVoteSelection: {}, // VOTE: blank vote pre-confirm Map<PlayerID, PlayerID>
+    blankVotes: {},         // VOTE: blank vote confirmed Map<PlayerID, PlayerID>
     dealerGuess: null,
     revealStartTime: null,
 

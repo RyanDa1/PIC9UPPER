@@ -251,6 +251,7 @@ export class GameRoom {
         case "advancePlay":     return this.onAdvancePlay(ws, playerId);
         case "advanceReveal":   return this.onAdvanceReveal(ws, playerId);
         case "selectVote":      return this.onSelectVote(ws, playerId, data);
+        case "selectBlankVote": return this.onSelectBlankVote(ws, playerId, data);
         case "confirmVote":     return this.onConfirmVote(ws, playerId);
         case "backToLobby":     return this.onBackToLobby(ws, playerId);
         case "startNextRound":  return this.onStartNextRound(ws, playerId);
@@ -519,6 +520,14 @@ export class GameRoom {
 
   onSelectVote(ws, playerId, data) {
     const result = game.handleSelectVote(this.session, playerId, data.targetId);
+    if (result.error) return;
+    this.session = result.session;
+    // Send only to this player (local-only, not broadcast)
+    this.send(ws, { type: "state", session: this.session });
+  }
+
+  onSelectBlankVote(ws, playerId, data) {
+    const result = game.handleSelectBlankVote(this.session, playerId, data.targetId);
     if (result.error) return;
     this.session = result.session;
     // Send only to this player (local-only, not broadcast)

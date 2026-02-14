@@ -69,4 +69,5 @@ npm run deploy                 # Deploy to Cloudflare
 - Word library (`words.txt`): CSV format — `groupId,correctWord,wrong1,wrong2,wrong3,wrong4`
 - LocalStorage keys: `pic9upper-playerId`, `pic9upper-playerName`
 - Production: sticky playerIds via localStorage, reconnection via rejoin or name-match takeover
+- Blank voting: `config.dealerCanVoteBlank` / `config.playerCanVoteBlank` control whether blank guessing is active. Session carries `blankVoteSelection` (pre-confirm) and `blankVotes` (confirmed) alongside the normal vote maps. Scoring keys: `dealerCorrectBlank`, `playerCorrectBlank`, `blankEscape`. Helper `canVoteBlank(session, playerId)` in game.js determines per-player eligibility.
 - Wrangler config: `wrangler.jsonc` — assets served from `public/` with SPA fallback

@@ -244,6 +244,18 @@ main {
   border-color: #3b82f6;
 }
 
+.blank-vote-btn.selected {
+  background: #374151;
+  border-color: #9ca3af;
+}
+
+.vote-divider {
+  width: 80%;
+  height: 1px;
+  background: #334155;
+  margin: 0.5rem 0;
+}
+
 .your-word,
 .correct-word {
   font-size: 1.1rem;
@@ -1032,4 +1044,67 @@ main {
   padding-top: 1rem;
   border-top: 2px solid #334155;
   width: 100%;
+}
+
+/* ---- Wide result cards (when blank voting is active) ---- */
+.role-group-cards-wide {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.result-card-wide {
+  max-width: 220px;
+}
+
+/* Split votes area: normal votes left, blank votes right */
+.result-votes-area.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.result-votes-area:not(.split) {
+  margin-top: 0;
+}
+
+/* Blank voters column */
+.result-blank-voters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  border-left: 1px solid #334155;
+  padding-left: 0.35rem;
+}
+
+/* Blank vote voter box styling */
+.voter-box-large.blank-vote {
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid #475569;
+}
+
+.voter-box-large.blank-vote.dealer-vote {
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid #92711a;
+}
+
+.blank-flag {
+  font-size: 0.7rem;
+  margin-right: 0.15rem;
+  opacity: 0.7;
+}
+
+/* Blank escape tag */
+.blank-escape-tag {
+  font-size: 0.75rem;
+  color: #a5b4fc;
+  padding: 0.25rem 0.4rem;
+  border-radius: 4px;
+  background: rgba(165, 180, 252, 0.1);
+  border: 1px dashed #6366f1;
+  text-align: center;
+}
+
+.score-gain.blank-escape {
+  background: rgba(165, 180, 252, 0.2);
+  color: #a5b4fc;
 }

@@ -285,19 +285,26 @@ function renderConfigPanel(config) {
         </div>
       </div>
 
-      <div class="config-toggles">
-        <label class="toggle-label${config.dealerCount === 0 ? " disabled" : ""}">
-          <input type="checkbox" data-config="dealerRotation" ${config.dealerRotation ? "checked" : ""} ${config.dealerCount === 0 ? "disabled" : ""} />
-          庄家轮换
-        </label>
-        <label class="toggle-label">
-          <input type="checkbox" data-config="differentUndercoverWords" ${config.differentUndercoverWords ? "checked" : ""} />
-          卧底不同词
-        </label>
-      </div>
-
       <div class="advanced-settings" style="display: ${advancedSettingsExpanded ? "block" : "none"};">
         <h4>游戏设置</h4>
+        <div class="config-toggles" style="margin-bottom: 0.75rem; margin-top: 0; padding-top: 0; border-top: none;">
+          <label class="toggle-label${config.dealerCount === 0 ? " disabled" : ""}">
+            <input type="checkbox" data-config="dealerRotation" ${config.dealerRotation ? "checked" : ""} ${config.dealerCount === 0 ? "disabled" : ""} />
+            庄家轮换
+          </label>
+          <label class="toggle-label">
+            <input type="checkbox" data-config="differentUndercoverWords" ${config.differentUndercoverWords ? "checked" : ""} />
+            卧底不同词
+          </label>
+          <label class="toggle-label${config.dealerCount === 0 ? " disabled" : ""}">
+            <input type="checkbox" data-config="dealerCanVoteBlank" ${config.dealerCanVoteBlank ? "checked" : ""} ${config.dealerCount === 0 ? "disabled" : ""} />
+            庄家可选白板
+          </label>
+          <label class="toggle-label">
+            <input type="checkbox" data-config="playerCanVoteBlank" ${config.playerCanVoteBlank ? "checked" : ""} />
+            玩家可选白板
+          </label>
+        </div>
         <div class="scoring-rules">
           <div class="scoring-rule">
             <label>词汇揭露倒计时</label>
@@ -329,6 +336,21 @@ function renderConfigPanel(config) {
               <input type="number" min="0" max="10" value="${scoring.blankFromDealer}" data-scoring="blankFromDealer" class="scoring-input" />
               <span>分</span>
             </div>
+            <div class="scoring-rule" style="display: ${config.dealerCanVoteBlank ? "flex" : "none"};">
+              <label>庄家选对白板，庄家得</label>
+              <input type="number" min="0" max="10" value="${scoring.dealerCorrectBlank}" data-scoring="dealerCorrectBlank" class="scoring-input" />
+              <span>分</span>
+            </div>
+          </div>
+          <div class="scoring-rule" style="display: ${config.playerCanVoteBlank ? "flex" : "none"};">
+            <label>玩家选对白板，得</label>
+            <input type="number" min="0" max="10" value="${scoring.playerCorrectBlank}" data-scoring="playerCorrectBlank" class="scoring-input" />
+            <span>分</span>
+          </div>
+          <div class="scoring-rule" style="display: ${config.dealerCanVoteBlank || config.playerCanVoteBlank ? "flex" : "none"};">
+            <label>白板逃脱，白板得</label>
+            <input type="number" min="0" max="10" value="${scoring.blankEscape}" data-scoring="blankEscape" class="scoring-input" />
+            <span>分</span>
           </div>
           <div class="scoring-rule">
             <label>玩家投对平民，得</label>
@@ -475,8 +497,18 @@ function renderReveal(session, playerId) {
 
 function renderVote(session, playerId) {
   const hasVoted = session.votes[playerId] != null;
+  const config = session.config || {};
 
-  if (hasVoted) {
+  // Determine if this player needs blank voting
+  const isDealer = playerId === session.dealerId;
+  const needsBlankVote = config.blankCount > 0 && (
+    (isDealer && config.dealerCanVoteBlank) ||
+    (!isDealer && config.playerCanVoteBlank)
+  );
+
+  // Check if fully done (regular vote confirmed + blank vote if needed)
+  const blankVoteDone = !needsBlankVote || session.blankVotes?.[playerId] != null;
+  if (hasVoted && blankVoteDone) {
     return `
       <div class="screen vote">
         <p class="phase-hint">等待其他玩家投票...</p>
@@ -484,7 +516,6 @@ function renderVote(session, playerId) {
     `;
   }
 
-  const isDealer = playerId === session.dealerId;
   const candidates = isDealer
     ? session.players.filter((p) => p !== session.dealerId)
     : session.players.filter((p) => p !== playerId && p !== session.dealerId);
@@ -492,7 +523,7 @@ function renderVote(session, playerId) {
   const selections = session.voteSelection?.[playerId] || [];
   // Dealer gets 2 votes, other players get 1
   const maxVotes = isDealer ? 2 : 1;
-  const canConfirm = selections.length === maxVotes;
+  const voteReady = selections.length === maxVotes;
 
   const prompt = isDealer
     ? "谁拿到了正确词语？"
@@ -501,6 +532,26 @@ function renderVote(session, playerId) {
   const counter = maxVotes > 1
     ? `<p class="hint">已选 ${selections.length} / ${maxVotes}</p>`
     : "";
+
+  // Blank vote section
+  let blankSection = "";
+  if (needsBlankVote) {
+    const blankSelection = session.blankVoteSelection?.[playerId] ?? null;
+    blankSection = `
+      <div class="vote-divider"></div>
+      <p class="phase-hint">谁是白板？</p>
+      <div class="vote-section">
+        ${candidates.map((p) => `
+          <button class="btn vote-btn blank-vote-btn ${blankSelection === p ? "selected" : ""}" data-action="select-blank-vote" data-target="${p}">
+            ${escapeHtml(getPlayerName(session, p))}
+          </button>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  const blankReady = !needsBlankVote || (session.blankVoteSelection?.[playerId] != null);
+  const canConfirm = voteReady && blankReady;
 
   return `
     <div class="screen vote">
@@ -513,6 +564,7 @@ function renderVote(session, playerId) {
         `).join("")}
       </div>
       ${counter}
+      ${blankSection}
       <button class="btn primary" data-action="confirm-vote" ${canConfirm ? "" : "disabled"}>投票</button>
     </div>
   `;
@@ -521,20 +573,24 @@ function renderVote(session, playerId) {
 function renderResult(session, playerId) {
   const iAmHost = isHostPlayer(session, playerId);
   const scoring = session.config?.scoring || DEFAULT_SCORING;
+  const config = session.config || {};
   const dealerId = session.dealerId;
+  const hasBlankVoting = Object.keys(session.blankVotes || {}).length > 0;
 
   // Calculate scores for this round
   function calculateScoring() {
     const roundScores = {};  // playerId -> total score this round
     const voteDetails = {};  // targetId -> [{voterId, voterName, voterRole, voterScoreGain, isDealer}]
+    const blankVoteDetails = {};  // targetId -> [{voterId, voterName, voterScoreGain, isDealer}]
 
     // Initialize scores
     for (const p of session.players) {
       roundScores[p] = 0;
       voteDetails[p] = [];
+      blankVoteDetails[p] = [];
     }
 
-    // Process all votes
+    // Process all votes (correct-word guessing)
     for (const [voterId, picks] of Object.entries(session.votes)) {
       if (!Array.isArray(picks)) continue;
       const voterIsDealer = voterId === dealerId;
@@ -546,25 +602,18 @@ function renderResult(session, playerId) {
         let targetScoreGain = 0;
 
         if (voterIsDealer) {
-          // Dealer voting
           if (targetRole === Role.CIVILIAN) {
-            // 庄家投对平民
             voterScoreGain = scoring.dealerCorrectCivilian;
             targetScoreGain = scoring.civilianFromDealer;
           } else if (targetRole === Role.UNDERCOVER) {
-            // 庄家投错卧底
             targetScoreGain = scoring.undercoverFromDealer;
           } else if (targetRole === Role.BLANK) {
-            // 庄家投错白板
             targetScoreGain = scoring.blankFromDealer;
           }
         } else {
-          // Non-dealer player voting
           if (targetRole === Role.CIVILIAN) {
-            // 玩家投对平民
             voterScoreGain = scoring.playerCorrectCivilian;
           }
-          // 被其他玩家投票，被投者得分
           targetScoreGain = scoring.receivedVote;
         }
 
@@ -582,10 +631,48 @@ function renderResult(session, playerId) {
       }
     }
 
-    return { roundScores, voteDetails };
+    // Process blank votes
+    const blankVotedTargets = new Set();
+    for (const [voterId, targetId] of Object.entries(session.blankVotes || {})) {
+      if (targetId == null) continue;
+      const voterIsDealer = voterId === dealerId;
+      const targetRole = session.roles?.[targetId];
+      let voterScoreGain = 0;
+
+      if (targetRole === Role.BLANK) {
+        blankVotedTargets.add(targetId);
+        voterScoreGain = voterIsDealer
+          ? (scoring.dealerCorrectBlank || 3)
+          : (scoring.playerCorrectBlank || 3);
+      }
+
+      roundScores[voterId] = (roundScores[voterId] || 0) + voterScoreGain;
+
+      blankVoteDetails[targetId].push({
+        voterId,
+        voterName: getPlayerName(session, voterId),
+        voterScoreGain,
+        isDealer: voterIsDealer,
+        correct: targetRole === Role.BLANK,
+      });
+    }
+
+    // Blank escape scoring
+    const escapeDetails = {};
+    if (hasBlankVoting) {
+      for (const p of session.players) {
+        if (session.roles?.[p] === Role.BLANK && !blankVotedTargets.has(p)) {
+          const escapeScore = scoring.blankEscape || 3;
+          roundScores[p] = (roundScores[p] || 0) + escapeScore;
+          escapeDetails[p] = escapeScore;
+        }
+      }
+    }
+
+    return { roundScores, voteDetails, blankVoteDetails, escapeDetails };
   }
 
-  const { roundScores, voteDetails } = calculateScoring();
+  const { roundScores, voteDetails, blankVoteDetails, escapeDetails } = calculateScoring();
 
   // Build player results, excluding dealer (dealer card not shown)
   const nonDealerPlayers = session.players.filter((p) => p !== dealerId);
@@ -597,6 +684,9 @@ function renderResult(session, playerId) {
     roleDisplay: getRoleDisplayName(session.roles?.[p]),
     word: session.assignments[p] ?? "(无词)",
     voters: voteDetails[p] || [],
+    blankVoters: blankVoteDetails[p] || [],
+    escaped: escapeDetails[p] != null,
+    escapeScore: escapeDetails[p] || 0,
     roundScore: roundScores[p] || 0,
     isYou: p === playerId,
   }));
@@ -618,8 +708,8 @@ function renderResult(session, playerId) {
 
   function renderCard(r) {
     // Calculate score breakdown for display
-    let playerVoteScore = 0;  // 非庄家投票得分
-    let dealerVoteScore = 0;  // 庄家投票得分
+    let playerVoteScore = 0;
+    let dealerVoteScore = 0;
 
     for (const v of r.voters) {
       if (v.isDealer) {
@@ -629,6 +719,9 @@ function renderResult(session, playerId) {
       }
     }
 
+    // Include escape score in the total display
+    const totalExtraScore = r.escapeScore;
+
     const scoreDisplay = [];
     if (playerVoteScore > 0) {
       scoreDisplay.push(`<span class="score-gain player">+${playerVoteScore}</span>`);
@@ -636,12 +729,43 @@ function renderResult(session, playerId) {
     if (dealerVoteScore > 0) {
       scoreDisplay.push(`<span class="score-gain dealer">+${dealerVoteScore}</span>`);
     }
+    if (totalExtraScore > 0) {
+      scoreDisplay.push(`<span class="score-gain blank-escape">+${totalExtraScore}</span>`);
+    }
 
-    // Display name: "名字（你）" if isYou, otherwise just name
     const displayName = r.isYou ? `${escapeHtml(r.name)}（你）` : escapeHtml(r.name);
 
+    // Normal voters section
+    const votersHtml = r.voters.length > 0 ? r.voters.map((v) => `
+      <div class="voter-box-large ${v.isDealer ? "dealer-vote" : ""}">
+        <span class="voter-name">${v.isDealer ? '<span class="crown">👑</span> ' : ""}${escapeHtml(v.voterName)}</span>
+        ${v.voterScoreGain > 0 ? `<span class="voter-score player">+${v.voterScoreGain}</span>` : ""}
+      </div>
+    `).join("") : '<div class="no-votes">无人投票</div>';
+
+    // Blank voters section (only if blank voting is active)
+    let blankVotersHtml = "";
+    if (hasBlankVoting) {
+      let blankContent;
+      if (r.blankVoters.length > 0) {
+        blankContent = r.blankVoters.map((v) => `
+          <div class="voter-box-large blank-vote ${v.isDealer ? "dealer-vote" : ""}">
+            <span class="voter-name">${v.isDealer ? '<span class="crown">👑</span> ' : ""}<span class="blank-flag">\u2691</span>${escapeHtml(v.voterName)}</span>
+            ${v.voterScoreGain > 0 ? `<span class="voter-score player">+${v.voterScoreGain}</span>` : ""}
+          </div>
+        `).join("");
+      } else if (r.escaped) {
+        blankContent = `<div class="blank-escape-tag"><span class="blank-flag">\u2691</span> 逃脱 <span class="score-gain blank-escape">+${r.escapeScore}</span></div>`;
+      } else {
+        blankContent = '<div class="no-votes"><span class="blank-flag">\u2691</span> 无人猜中</div>';
+      }
+      blankVotersHtml = `<div class="result-blank-voters">${blankContent}</div>`;
+    }
+
+    const cardClass = hasBlankVoting ? "result-card result-card-wide" : "result-card";
+
     return `
-      <div class="result-card">
+      <div class="${cardClass}">
         <div class="result-header">
           <span class="player-name">${displayName}</span>
           <div class="score-badges">
@@ -650,13 +774,11 @@ function renderResult(session, playerId) {
           <span class="role-badge-small">${r.roleDisplay}</span>
         </div>
         <div class="result-word">${escapeHtml(r.word)}</div>
-        <div class="result-voters">
-          ${r.voters.length > 0 ? r.voters.map((v) => `
-            <div class="voter-box-large ${v.isDealer ? "dealer-vote" : ""}">
-              <span class="voter-name">${v.isDealer ? '<span class="crown">👑</span> ' : ""}${escapeHtml(v.voterName)}</span>
-              ${v.voterScoreGain > 0 ? `<span class="voter-score player">+${v.voterScoreGain}</span>` : ""}
-            </div>
-          `).join("") : '<div class="no-votes">无人投票</div>'}
+        <div class="result-votes-area ${hasBlankVoting ? "split" : ""}">
+          <div class="result-voters">
+            ${votersHtml}
+          </div>
+          ${blankVotersHtml}
         </div>
       </div>
     `;
@@ -664,10 +786,11 @@ function renderResult(session, playerId) {
 
   function renderRoleGroup(roleResults, roleLabel) {
     if (roleResults.length === 0) return "";
+    const gridClass = hasBlankVoting ? "role-group-cards role-group-cards-wide" : "role-group-cards";
     return `
       <div class="role-group">
         <div class="role-group-label">${roleLabel}</div>
-        <div class="role-group-cards">
+        <div class="${gridClass}">
           ${roleResults.map((r) => renderCard(r)).join("")}
         </div>
       </div>
@@ -956,6 +1079,8 @@ function attachListeners(root, playerId, sendAction, helpers = {}, session = nul
           // If advanced settings expanded, also reset advanced settings
           if (advancedSettingsExpanded) {
             defaultConfig.revealCountdown = 15;
+            defaultConfig.dealerCanVoteBlank = false;
+            defaultConfig.playerCanVoteBlank = false;
             defaultConfig.scoring = { ...DEFAULT_SCORING };
           }
 
@@ -985,6 +1110,10 @@ function attachListeners(root, playerId, sendAction, helpers = {}, session = nul
 
         case "select-vote":
           if (target) sendAction({ type: "selectVote", targetId: target });
+          break;
+
+        case "select-blank-vote":
+          if (target) sendAction({ type: "selectBlankVote", targetId: target });
           break;
 
         case "confirm-vote":
@@ -1052,10 +1181,17 @@ function buildConfigFromForm(root, currentConfig = {}) {
     blankFromDealer: getScoringValue("blankFromDealer") ?? currentScoring.blankFromDealer,
     playerCorrectCivilian: getScoringValue("playerCorrectCivilian") ?? currentScoring.playerCorrectCivilian,
     receivedVote: getScoringValue("receivedVote") ?? currentScoring.receivedVote,
+    dealerCorrectBlank: getScoringValue("dealerCorrectBlank") ?? currentScoring.dealerCorrectBlank,
+    playerCorrectBlank: getScoringValue("playerCorrectBlank") ?? currentScoring.playerCorrectBlank,
+    blankEscape: getScoringValue("blankEscape") ?? currentScoring.blankEscape,
   };
 
   const dealerToggle = getValue("dealerToggle");
   const dealerCount = dealerToggle === null ? (currentConfig.dealerCount ?? 1) : (dealerToggle ? 1 : 0);
+
+  // When dealer is off, force dealerCanVoteBlank off
+  const dealerCanVoteBlank = dealerCount === 0 ? false : (getValue("dealerCanVoteBlank") ?? false);
+  const playerCanVoteBlank = getValue("playerCanVoteBlank") ?? false;
 
   return {
     capacity: currentConfig.capacity ?? 6,
@@ -1065,6 +1201,8 @@ function buildConfigFromForm(root, currentConfig = {}) {
     blankCount: getValue("blankCount") ?? 0,
     dealerRotation: dealerCount === 0 ? false : (getValue("dealerRotation") ?? false),
     differentUndercoverWords: getValue("differentUndercoverWords") ?? false,
+    dealerCanVoteBlank,
+    playerCanVoteBlank,
     revealCountdown: getValue("revealCountdown") ?? (currentConfig.revealCountdown ?? DEFAULT_REVEAL_COUNTDOWN_SEC),
     scoring,
   };
