@@ -26,8 +26,14 @@ export function isHost(session, playerId) {
 }
 
 export function getVoteCount(session, playerId) {
-  const isDealer = playerId === session.dealerId;
+  const isDealer = session.dealerId && playerId === session.dealerId;
   return isDealer ? 2 : 1;
+}
+
+/** Who can press phase-advancement buttons (reveal word, start voting) */
+function canAdvancePhase(session, playerId) {
+  if (session.dealerId) return playerId === session.dealerId;
+  return isHost(session, playerId);
 }
 
 /* ------------------------------------------------------------------ */
@@ -157,7 +163,10 @@ export function handlePlaceCard(session, playerId) {
 
 export function handleAdvancePlay(session, playerId) {
   if (!session || session.phase !== Phase.PLAY) return { error: { code: "invalid", message: "Not in PLAY phase" } };
-  if (playerId !== session.dealerId) return { error: { code: "not_dealer", message: "只有庄家可以继续" } };
+  if (!canAdvancePhase(session, playerId)) {
+    const msg = session.dealerId ? "只有庄家可以继续" : "只有房主可以继续";
+    return { error: { code: "not_authorized", message: msg } };
+  }
 
   return {
     session: {
@@ -172,7 +181,10 @@ export function handleAdvancePlay(session, playerId) {
 
 export function handleAdvanceReveal(session, playerId) {
   if (!session || session.phase !== Phase.REVEAL) return { error: { code: "invalid", message: "Not in REVEAL phase" } };
-  if (playerId !== session.dealerId) return { error: { code: "not_dealer", message: "只有庄家可以继续" } };
+  if (!canAdvancePhase(session, playerId)) {
+    const msg = session.dealerId ? "只有庄家可以继续" : "只有房主可以继续";
+    return { error: { code: "not_authorized", message: msg } };
+  }
 
   const newSession = {
     ...session,

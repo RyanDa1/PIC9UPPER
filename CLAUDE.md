@@ -65,6 +65,7 @@ npm run deploy                 # Deploy to Cloudflare
 
 ## Key Details
 
+- Dealer mode: `config.dealerCount` can be 0 (no dealer, host facilitates phase advancement) or 1 (traditional with dealer). When `dealerCount=0`, `dealerId` is `null` and the host takes over phase-advancement buttons while playing normally with 1 vote.
 - Word library (`words.txt`): CSV format — `groupId,correctWord,wrong1,wrong2,wrong3,wrong4`
 - LocalStorage keys: `pic9upper-playerId`, `pic9upper-playerName`
 - Production: sticky playerIds via localStorage, reconnection via rejoin or name-match takeover

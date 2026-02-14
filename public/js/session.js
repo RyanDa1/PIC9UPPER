@@ -65,10 +65,9 @@ export const DEFAULT_SCORING = {
 };
 
 /** Generate default room configuration for given capacity */
-export function getDefaultConfig(capacity = 6) {
-  const dealerCount = 1;
+export function getDefaultConfig(capacity = 6, dealerCount = 1) {
   const civilianCount = 2;
-  const undercoverCount = Math.max(0, capacity - 3);
+  const undercoverCount = Math.max(0, capacity - dealerCount - civilianCount);
   const blankCount = 0;
   return {
     capacity,

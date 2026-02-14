@@ -582,6 +582,11 @@ main {
   cursor: pointer;
 }
 
+.toggle-label.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 /* ---- Role Colors ---- */
 .role-dealer {
   background: #1f2937 !important;

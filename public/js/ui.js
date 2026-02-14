@@ -254,6 +254,13 @@ function renderConfigPanel(config) {
         </div>
       </div>
 
+      <div class="config-toggles" style="margin-bottom: 0.75rem;">
+        <label class="toggle-label">
+          <input type="checkbox" data-config="dealerToggle" ${config.dealerCount === 1 ? "checked" : ""} />
+          有庄家
+        </label>
+      </div>
+
       <div class="config-row">
         <label>平民 (1+)</label>
         <div class="config-control">
@@ -279,8 +286,8 @@ function renderConfigPanel(config) {
       </div>
 
       <div class="config-toggles">
-        <label class="toggle-label">
-          <input type="checkbox" data-config="dealerRotation" ${config.dealerRotation ? "checked" : ""} />
+        <label class="toggle-label${config.dealerCount === 0 ? " disabled" : ""}">
+          <input type="checkbox" data-config="dealerRotation" ${config.dealerRotation ? "checked" : ""} ${config.dealerCount === 0 ? "disabled" : ""} />
           庄家轮换
         </label>
         <label class="toggle-label">
@@ -301,25 +308,27 @@ function renderConfigPanel(config) {
 
         <h4>计分规则</h4>
         <div class="scoring-rules">
-          <div class="scoring-rule">
-            <label>庄家投对平民，庄家得</label>
-            <input type="number" min="0" max="10" value="${scoring.dealerCorrectCivilian}" data-scoring="dealerCorrectCivilian" class="scoring-input" />
-            <span>分</span>
-          </div>
-          <div class="scoring-rule">
-            <label>庄家投对平民，平民得</label>
-            <input type="number" min="0" max="10" value="${scoring.civilianFromDealer}" data-scoring="civilianFromDealer" class="scoring-input" />
-            <span>分</span>
-          </div>
-          <div class="scoring-rule">
-            <label>庄家投错卧底，卧底得</label>
-            <input type="number" min="0" max="10" value="${scoring.undercoverFromDealer}" data-scoring="undercoverFromDealer" class="scoring-input" />
-            <span>分</span>
-          </div>
-          <div class="scoring-rule">
-            <label>庄家投错白板，白板得</label>
-            <input type="number" min="0" max="10" value="${scoring.blankFromDealer}" data-scoring="blankFromDealer" class="scoring-input" />
-            <span>分</span>
+          <div class="dealer-scoring-rules" style="display: ${config.dealerCount === 1 ? "block" : "none"};">
+            <div class="scoring-rule">
+              <label>庄家投对平民，庄家得</label>
+              <input type="number" min="0" max="10" value="${scoring.dealerCorrectCivilian}" data-scoring="dealerCorrectCivilian" class="scoring-input" />
+              <span>分</span>
+            </div>
+            <div class="scoring-rule">
+              <label>庄家投对平民，平民得</label>
+              <input type="number" min="0" max="10" value="${scoring.civilianFromDealer}" data-scoring="civilianFromDealer" class="scoring-input" />
+              <span>分</span>
+            </div>
+            <div class="scoring-rule">
+              <label>庄家投错卧底，卧底得</label>
+              <input type="number" min="0" max="10" value="${scoring.undercoverFromDealer}" data-scoring="undercoverFromDealer" class="scoring-input" />
+              <span>分</span>
+            </div>
+            <div class="scoring-rule">
+              <label>庄家投错白板，白板得</label>
+              <input type="number" min="0" max="10" value="${scoring.blankFromDealer}" data-scoring="blankFromDealer" class="scoring-input" />
+              <span>分</span>
+            </div>
           </div>
           <div class="scoring-rule">
             <label>玩家投对平民，得</label>
@@ -412,27 +421,32 @@ function renderDeal(session, playerId, assignment) {
 }
 
 function renderPlay(session, playerId) {
-  const isDealer = playerId === session.dealerId;
+  const isDealer = session.dealerId && playerId === session.dealerId;
+  const isHostFacilitator = !session.dealerId && isHostPlayer(session, playerId);
+  const canAdvance = isDealer || isHostFacilitator;
 
-  if (isDealer) {
+  if (canAdvance) {
     return `
       <div class="screen play">
-        <div class="role-badge role-dealer">庄家</div>
+        ${isDealer ? '<div class="role-badge role-dealer">庄家</div>' : ""}
         <p class="phase-hint">所有人已放置卡片</p>
         <button class="btn primary" data-action="advance-play">揭示词语</button>
       </div>
     `;
   }
 
+  const waitMsg = session.dealerId ? "等待庄家揭示词语..." : "等待房主揭示词语...";
   return `
     <div class="screen play">
-      <p class="phase-hint">等待庄家揭示词语...</p>
+      <p class="phase-hint">${waitMsg}</p>
     </div>
   `;
 }
 
 function renderReveal(session, playerId) {
-  const isDealer = playerId === session.dealerId;
+  const isDealer = session.dealerId && playerId === session.dealerId;
+  const isHostFacilitator = !session.dealerId && isHostPlayer(session, playerId);
+  const canAdvance = isDealer || isHostFacilitator;
   const countdownSec = session.config?.revealCountdown ?? DEFAULT_REVEAL_COUNTDOWN_SEC;
   const elapsed = session.revealStartTime ? (Date.now() - session.revealStartTime) / 1000 : countdownSec;
   const remaining = Math.max(0, countdownSec - Math.floor(elapsed));
@@ -441,7 +455,7 @@ function renderReveal(session, playerId) {
   let bottomSection;
   if (!countdownDone) {
     bottomSection = `<div class="countdown" id="reveal-countdown">${remaining}</div>`;
-  } else if (isDealer) {
+  } else if (canAdvance) {
     bottomSection = `
       <p class="phase-hint">听听大家的故事吧</p>
       <button class="btn primary" data-action="advance-reveal">开始投票</button>
@@ -791,7 +805,14 @@ function attachListeners(root, playerId, sendAction, helpers = {}, session = nul
     });
 
     el.addEventListener("change", () => {
-      const newConfig = buildConfigFromForm(root, currentConfig);
+      let newConfig = buildConfigFromForm(root, currentConfig);
+
+      // When dealer toggle changes, auto-adjust undercoverCount to keep sum = capacity
+      if (configKey === "dealerToggle") {
+        const { capacity, dealerCount, civilianCount, blankCount } = newConfig;
+        newConfig = { ...newConfig, undercoverCount: Math.max(0, capacity - dealerCount - civilianCount - blankCount) };
+      }
+
       const validation = validateConfig(newConfig);
 
       if (validation.valid) {
@@ -921,11 +942,12 @@ function attachListeners(root, playerId, sendAction, helpers = {}, session = nul
         }
 
         case "reset-config": {
-          // Get default config for current capacity
+          // Get default config for current capacity, respecting current dealer toggle
+          const dc = currentConfig.dealerCount ?? 1;
           const defaultConfig = {
             ...currentConfig,
             civilianCount: 2,
-            undercoverCount: Math.max(0, currentConfig.capacity - 3),
+            undercoverCount: Math.max(0, currentConfig.capacity - dc - 2),
             blankCount: 0,
             dealerRotation: false,
             differentUndercoverWords: false,
@@ -1032,14 +1054,16 @@ function buildConfigFromForm(root, currentConfig = {}) {
     receivedVote: getScoringValue("receivedVote") ?? currentScoring.receivedVote,
   };
 
+  const dealerToggle = getValue("dealerToggle");
+  const dealerCount = dealerToggle === null ? (currentConfig.dealerCount ?? 1) : (dealerToggle ? 1 : 0);
+
   return {
-    // capacity and dealerCount are fixed, use current values
     capacity: currentConfig.capacity ?? 6,
-    dealerCount: 1, // Always 1 dealer
+    dealerCount,
     civilianCount: getValue("civilianCount") ?? 2,
     undercoverCount: getValue("undercoverCount") ?? 3,
     blankCount: getValue("blankCount") ?? 0,
-    dealerRotation: getValue("dealerRotation") ?? false,
+    dealerRotation: dealerCount === 0 ? false : (getValue("dealerRotation") ?? false),
     differentUndercoverWords: getValue("differentUndercoverWords") ?? false,
     revealCountdown: getValue("revealCountdown") ?? (currentConfig.revealCountdown ?? DEFAULT_REVEAL_COUNTDOWN_SEC),
     scoring,

@@ -176,3 +176,10 @@ No implicit loops.
   - **Basic settings** (always reset): civilian count, undercover count, blank count, dealer rotation, different undercover words
   - **Advanced settings** (only reset if panel is expanded): reveal countdown, all scoring parameters
   - Default values match those in `getDefaultConfig()` from session.js (e.g., 2 civilians, capacity-3 undercovers, 0 blanks, 15s countdown, standard scoring rules)
+- **No-dealer mode (无庄家模式)** — A "有庄家" toggle (first setting in config panel, default ON) controls whether a dealer is assigned. When toggled OFF (`dealerCount=0`):
+  - All capacity slots go to game roles (civilian/undercover/blank). Toggling the dealer off auto-increases undercover count by 1.
+  - "庄家轮换" toggle is disabled/dimmed; dealer-specific scoring rules are hidden in advanced settings.
+  - Every player (including host) gets a word, places a card, and votes with 1 vote.
+  - The host takes over phase-advancement duties: "揭示词语" button in PLAY phase, "开始投票" button in REVEAL phase.
+  - Result screen shows all players as role cards (no one excluded). Scoring uses only non-dealer rules (playerCorrectCivilian, receivedVote).
+  - Setting persists across rounds via config.
