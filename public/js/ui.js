@@ -7,7 +7,7 @@
 import {
   Phase, Role, getPlayerAssignment, getPlayerName, isHostPlayer,
   getRoleDisplayName, getRoleColorClass, validateConfig,
-  MIN_PLAYERS, MAX_PLAYERS, DEFAULT_SCORING,
+  MIN_PLAYERS, MAX_PLAYERS, DEFAULT_SCORING, getDefaultConfig,
 } from "./session.js";
 
 const DEFAULT_REVEAL_COUNTDOWN_SEC = 15;
@@ -17,6 +17,10 @@ let revealTimerId = null;
 let wordVisible = false;
 // Tracks whether the player has seen their word at least once (enables "I've placed my card")
 let wordSeenOnce = true;
+// Tracks whether advanced settings panel is expanded (persists across re-renders)
+let advancedSettingsExpanded = false;
+// Tracks which tab is active in the result screen ('round' or 'leaderboard')
+let resultActiveTab = 'round';
 
 export function render(session, playerId, sendAction, helpers = {}) {
   const root = document.getElementById("app");
@@ -38,10 +42,30 @@ export function render(session, playerId, sendAction, helpers = {}) {
     wordSeenOnce = false;
   }
 
+  // Reset advanced settings state when leaving LOBBY phase
+  if (phase !== Phase.LOBBY) {
+    advancedSettingsExpanded = false;
+  }
+
+  // Reset result tab state when leaving RESULT phase
+  if (phase !== Phase.RESULT) {
+    resultActiveTab = 'round';
+  }
+
   // Clean up reveal countdown when leaving REVEAL phase
   if (phase !== Phase.REVEAL && revealTimerId) {
     clearInterval(revealTimerId);
     revealTimerId = null;
+  }
+
+  // Player not in this game? Show unified "Enter Room" screen.
+  // Works for both LOBBY (new join) and non-LOBBY (reconnect by name).
+  const isInGame = session.players.includes(playerId);
+  if (!isInGame) {
+    const screenHtml = renderEnterRoom(session, helpers);
+    root.innerHTML = homeBtn + screenHtml;
+    attachListeners(root, playerId, sendAction, helpers, session);
+    return;
   }
 
   let screenHtml;
@@ -135,32 +159,13 @@ function renderHome(helpers) {
 }
 
 function renderLobby(session, playerId, sendAction, helpers) {
-  const isInLobby = session.players.includes(playerId);
+  // Note: renderLobby is only called when player IS in the lobby.
+  // The "not in lobby" case is now handled by renderEnterRoom.
   const iAmHost = isHostPlayer(session, playerId);
   const count = session.players.length;
   const config = session.config || { capacity: 6 };
   const capacity = config.capacity;
   const joinUrl = helpers.getJoinUrl?.(session.id) ?? "";
-  const storedName = helpers.getStoredPlayerName?.() ?? "";
-
-  if (!isInLobby) {
-    // Preserve current input value if user is typing (avoid reset on re-render)
-    const currentInput = document.getElementById("join-name");
-    const currentValue = currentInput?.value ?? storedName;
-
-    return `
-      <div class="screen lobby join">
-        <h1>加入房间</h1>
-        <div class="form-group">
-          <label for="join-name">你的名字</label>
-          <input type="text" id="join-name" class="input" placeholder="输入你的名字" maxlength="20" value="${escapeHtml(currentValue)}" />
-        </div>
-        <button class="btn primary" data-action="join">加入</button>
-        <p id="join-error" class="hint error" style="display:none"></p>
-        ${count >= capacity ? '<p class="hint error">房间已满</p>' : ""}
-      </div>
-    `;
-  }
 
   // Build seats array
   const seats = [];
@@ -243,7 +248,10 @@ function renderConfigPanel(config) {
     <div class="config-panel">
       <div class="config-header">
         <h3>游戏设置</h3>
-        <button class="btn-text" data-action="toggle-advanced">高级设置</button>
+        <div class="config-header-buttons">
+          <button class="btn-text" data-action="reset-config">恢复默认</button>
+          <button class="btn-text" data-action="toggle-advanced">${advancedSettingsExpanded ? "收起设置" : "高级设置"}</button>
+        </div>
       </div>
 
       <div class="config-row">
@@ -281,7 +289,7 @@ function renderConfigPanel(config) {
         </label>
       </div>
 
-      <div class="advanced-settings" style="display: none;">
+      <div class="advanced-settings" style="display: ${advancedSettingsExpanded ? "block" : "none"};">
         <h4>游戏设置</h4>
         <div class="scoring-rules">
           <div class="scoring-rule">
@@ -336,6 +344,34 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
+function renderEnterRoom(session, helpers) {
+  const storedName = helpers.getStoredPlayerName?.() ?? "";
+  const currentNameInput = document.getElementById("join-name");
+  const currentValue = currentNameInput?.value ?? storedName;
+  const roomId = session.id || "";
+  const isLobby = session.phase === Phase.LOBBY;
+  const title = isLobby ? "进入房间" : "重新进入房间";
+  const hint = isLobby ? "" : '<p class="hint">游戏进行中，输入你的名字重新加入</p>';
+  const btnLabel = isLobby ? "进入房间" : "重新加入";
+
+  return `
+    <div class="screen lobby join">
+      <h1>${title}</h1>
+      ${hint}
+      <div class="form-group">
+        <label for="join-room-id">房间号</label>
+        <input type="text" id="join-room-id" class="input" value="${escapeHtml(roomId)}" readonly />
+      </div>
+      <div class="form-group">
+        <label for="join-name">你的名字</label>
+        <input type="text" id="join-name" class="input" placeholder="输入你的名字" maxlength="20" value="${escapeHtml(currentValue)}" />
+      </div>
+      <button class="btn primary" data-action="join">${btnLabel}</button>
+      <p id="join-error" class="hint error" style="display:none"></p>
+    </div>
+  `;
+}
+
 function renderDeal(session, playerId, assignment) {
   const isDealer = playerId === session.dealerId;
   const myRole = session.roles?.[playerId];
@@ -365,8 +401,8 @@ function renderDeal(session, playerId, assignment) {
 
   return `
     <div class="screen deal">
-      <div class="scratch-card togglable ${wordVisible ? "revealed" : ""}" data-action="toggle-word">
-        <div class="scratch-overlay">点击查看你的词语</div>
+      <div class="scratch-card togglable ${wordVisible ? "revealed" : ""}">
+        <div class="scratch-overlay">按住查看你的词语</div>
         <div class="scratch-word">${escapeHtml(wordText)}</div>
       </div>
       <p class="phase-hint">选择你的卡片</p>
@@ -660,7 +696,7 @@ function renderResult(session, playerId) {
   function renderLeaderboard() {
     return `
       <div class="leaderboard">
-        <h3>排行榜</h3>
+        <h2>排行榜</h2>
         <table class="leaderboard-table">
           <thead>
             <tr>
@@ -687,25 +723,30 @@ function renderResult(session, playerId) {
 
   return `
     <div class="screen result">
-      <h2>第${roundDisplay}盘结果揭晓</h2>
-
-      <div class="result-groups">
-        ${renderRoleGroup(civilians, "平民")}
-        ${renderRoleGroup(undercovers, "卧底")}
-        ${renderRoleGroup(blanks, "白板")}
+      <div class="result-tabs">
+        <button class="result-tab ${resultActiveTab === 'round' ? 'active' : ''}" data-action="switch-result-tab" data-tab="round">本轮结果</button>
+        <button class="result-tab ${resultActiveTab === 'leaderboard' ? 'active' : ''}" data-action="switch-result-tab" data-tab="leaderboard">排行榜</button>
       </div>
 
-      <div class="result-summary">
-        ${dealerId ? `
-          <div class="dealer-summary">
-            <span class="dealer-label">👑 庄家 ${dealerDisplayName}</span>
-            ${dealerScore > 0 ? `<span class="score-gain player">+${dealerScore}</span>` : ""}
+      <div class="result-content">
+        <div class="result-tab-panel ${resultActiveTab === 'round' ? 'active' : ''}" data-panel="round">
+          <h2>第${roundDisplay}盘结果揭晓</h2>
+
+          <div class="result-groups">
+            ${renderRoleGroup(civilians, "平民")}
+            ${renderRoleGroup(undercovers, "卧底")}
+            ${renderRoleGroup(blanks, "白板")}
           </div>
-        ` : ""}
-        <p class="correct-word">正确词: ${escapeHtml(session.words.correct)}</p>
-      </div>
 
-      ${renderLeaderboard()}
+          <div class="result-summary">
+            <p class="correct-word">正确词: ${escapeHtml(session.words.correct)}</p>
+          </div>
+        </div>
+
+        <div class="result-tab-panel ${resultActiveTab === 'leaderboard' ? 'active' : ''}" data-panel="leaderboard">
+          ${renderLeaderboard()}
+        </div>
+      </div>
 
       ${iAmHost ? `
         <div class="result-actions">
@@ -759,13 +800,54 @@ function attachListeners(root, playerId, sendAction, helpers = {}, session = nul
     });
   });
 
-  // Scoring rule input listeners
+  // Scoring rule input listeners (use input event to sync immediately, change to persist)
   root.querySelectorAll("[data-scoring]").forEach((el) => {
+    el.addEventListener("input", (e) => {
+      // Just update the display, don't send to server yet
+      e.stopPropagation();
+    });
+
     el.addEventListener("change", () => {
       const newConfig = buildConfigFromForm(root, currentConfig);
       sendAction({ type: "updateConfig", config: newConfig });
     });
   });
+
+  // Handle press-and-hold for word reveal (DEAL phase)
+  const scratchCard = root.querySelector(".scratch-card.togglable");
+  if (scratchCard) {
+    const showWord = () => {
+      wordVisible = true;
+      if (!wordSeenOnce) {
+        wordSeenOnce = true;
+        sendAction({ type: "acknowledgeDeal" });
+      }
+      scratchCard.classList.add("revealed");
+    };
+
+    const hideWord = () => {
+      wordVisible = false;
+      scratchCard.classList.remove("revealed");
+    };
+
+    // Mouse events (desktop)
+    scratchCard.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      showWord();
+    });
+
+    scratchCard.addEventListener("mouseup", hideWord);
+    scratchCard.addEventListener("mouseleave", hideWord);
+
+    // Touch events (mobile)
+    scratchCard.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      showWord();
+    });
+
+    scratchCard.addEventListener("touchend", hideWord);
+    scratchCard.addEventListener("touchcancel", hideWord);
+  }
 
   // Other action listeners
   root.querySelectorAll("[data-action]").forEach((el) => {
@@ -829,12 +911,33 @@ function attachListeners(root, playerId, sendAction, helpers = {}, session = nul
           break;
 
         case "toggle-advanced": {
+          advancedSettingsExpanded = !advancedSettingsExpanded;
           const advancedEl = root.querySelector(".advanced-settings");
           if (advancedEl) {
-            const isHidden = advancedEl.style.display === "none";
-            advancedEl.style.display = isHidden ? "block" : "none";
-            el.textContent = isHidden ? "收起设置" : "高级设置";
+            advancedEl.style.display = advancedSettingsExpanded ? "block" : "none";
           }
+          el.textContent = advancedSettingsExpanded ? "收起设置" : "高级设置";
+          break;
+        }
+
+        case "reset-config": {
+          // Get default config for current capacity
+          const defaultConfig = {
+            ...currentConfig,
+            civilianCount: 2,
+            undercoverCount: Math.max(0, currentConfig.capacity - 3),
+            blankCount: 0,
+            dealerRotation: false,
+            differentUndercoverWords: false,
+          };
+
+          // If advanced settings expanded, also reset advanced settings
+          if (advancedSettingsExpanded) {
+            defaultConfig.revealCountdown = 15;
+            defaultConfig.scoring = { ...DEFAULT_SCORING };
+          }
+
+          sendAction({ type: "updateConfig", config: defaultConfig });
           break;
         }
 
@@ -843,13 +946,7 @@ function attachListeners(root, playerId, sendAction, helpers = {}, session = nul
           break;
 
         case "toggle-word":
-          wordVisible = !wordVisible;
-          if (!wordSeenOnce) {
-            wordSeenOnce = true;
-            sendAction({ type: "acknowledgeDeal" });
-          }
-          // Re-render to show/hide word (local UI state)
-          root.querySelector(".scratch-card")?.classList.toggle("revealed", wordVisible);
+          // This case is no longer used - word visibility is now handled by mousedown/mouseup
           break;
 
         case "acknowledge-place":
@@ -890,6 +987,22 @@ function attachListeners(root, playerId, sendAction, helpers = {}, session = nul
           if (url) navigator.clipboard?.writeText(url);
           break;
         }
+
+        case "switch-result-tab": {
+          const tab = el.dataset.tab;
+          if (tab && (tab === 'round' || tab === 'leaderboard')) {
+            resultActiveTab = tab;
+            // Update tab buttons
+            root.querySelectorAll(".result-tab").forEach((tabBtn) => {
+              tabBtn.classList.toggle("active", tabBtn.dataset.tab === tab);
+            });
+            // Update panels
+            root.querySelectorAll(".result-tab-panel").forEach((panel) => {
+              panel.classList.toggle("active", panel.dataset.panel === tab);
+            });
+          }
+          break;
+        }
       }
     });
   });
@@ -928,6 +1041,7 @@ function buildConfigFromForm(root, currentConfig = {}) {
     blankCount: getValue("blankCount") ?? 0,
     dealerRotation: getValue("dealerRotation") ?? false,
     differentUndercoverWords: getValue("differentUndercoverWords") ?? false,
+    revealCountdown: getValue("revealCountdown") ?? (currentConfig.revealCountdown ?? DEFAULT_REVEAL_COUNTDOWN_SEC),
     scoring,
   };
 }
