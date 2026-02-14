@@ -1,6 +1,8 @@
 /**
  * WebSocket client — connects to the GameRoom Durable Object.
- * Replaces the old BroadcastChannel sync.
+ * Handles ping/pong keepalive and reconnection.
+ * No auto-rejoin: on reconnect, server sends state and client
+ * shows the "Enter Room" screen for the user to re-identify.
  */
 
 const RECONNECT_BASE_MS = 1000;
@@ -22,7 +24,6 @@ export function createWebSocketSync(roomId, callbacks = {}) {
   let reconnectDelay = RECONNECT_BASE_MS;
   let reconnectTimer = null;
   let closed = false;       // true after explicit close()
-  let rejoinPlayerId = null; // set after first welcome, used for reconnection
 
   function connect() {
     if (closed) return;
@@ -35,11 +36,6 @@ export function createWebSocketSync(roomId, callbacks = {}) {
     ws.onopen = () => {
       reconnectDelay = RECONNECT_BASE_MS; // reset backoff on success
       callbacks.onOpen?.();
-
-      // If we have a playerId from a previous connection, auto-rejoin
-      if (rejoinPlayerId) {
-        send({ type: "rejoin", playerId: rejoinPlayerId });
-      }
     };
 
     ws.onmessage = (event) => {
@@ -47,8 +43,11 @@ export function createWebSocketSync(roomId, callbacks = {}) {
       try { data = JSON.parse(event.data); } catch { return; }
 
       switch (data.type) {
+        case "ping":
+          // Respond to server keepalive
+          send({ type: "pong" });
+          break;
         case "welcome":
-          rejoinPlayerId = data.playerId;
           callbacks.onWelcome?.(data.playerId, data.roomId);
           break;
         case "state":
@@ -60,6 +59,10 @@ export function createWebSocketSync(roomId, callbacks = {}) {
         case "kicked":
           callbacks.onKicked?.();
           closed = true; // don't reconnect after kick
+          break;
+        case "destroyed":
+          callbacks.onKicked?.();
+          closed = true;
           break;
       }
     };
@@ -96,6 +99,7 @@ export function createWebSocketSync(roomId, callbacks = {}) {
 
   function close() {
     closed = true;
+    document.removeEventListener("visibilitychange", onVisibilityChange);
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     if (ws) { try { ws.close(1000, "Client closed"); } catch {} ws = null; }
   }
@@ -103,6 +107,22 @@ export function createWebSocketSync(roomId, callbacks = {}) {
   function isConnected() {
     return ws !== null && ws.readyState === WebSocket.OPEN;
   }
+
+  // Phone-idle recovery: when the tab becomes visible again, check if the
+  // WebSocket is still alive. If not, immediately trigger reconnect instead
+  // of waiting for the next backoff timeout.
+  function onVisibilityChange() {
+    if (document.visibilityState === "visible" && !closed) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        // Cancel any pending reconnect timer and connect immediately
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        reconnectDelay = RECONNECT_BASE_MS; // reset backoff for instant recovery
+        connect();
+      }
+    }
+  }
+
+  document.addEventListener("visibilitychange", onVisibilityChange);
 
   // Auto-connect immediately
   connect();

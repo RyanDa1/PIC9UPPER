@@ -39,8 +39,9 @@ function getJoinUrl(roomId) {
 
 function main() {
   let currentSession = null;
-  let playerId = getStoredPlayerId();
+  let playerId = null; // Set by server via "welcome" message, not from localStorage
   let ws = null; // WebSocket sync instance
+  let hasReceivedWelcome = false; // Track if we've been welcomed to prevent premature goHome
 
   const helpers = {
     getStoredPlayerName,
@@ -76,6 +77,7 @@ function main() {
     ws = createWebSocketSync(roomId, {
       onWelcome(newPlayerId, welcomeRoomId) {
         playerId = newPlayerId;
+        hasReceivedWelcome = true;
         setStoredPlayerId(newPlayerId);
         // Update URL if not already there
         const currentPath = location.pathname.replace(/^\/+|\/+$/g, "");
@@ -85,6 +87,16 @@ function main() {
       },
 
       onState(session) {
+        if (session === null) {
+          // Only go home if we've already been welcomed (room was destroyed)
+          // Don't go home on initial null state before onCreate completes
+          if (hasReceivedWelcome) {
+            goHome();
+            return;
+          }
+          // Initial connection - wait for welcome and subsequent state
+          return;
+        }
         currentSession = session;
         doRender();
       },
@@ -92,15 +104,11 @@ function main() {
       onError(code, message) {
         console.warn(`[GameRoom] Error: ${code} — ${message}`);
         // Show error to user for join failures
-        if (code === "duplicate_name" || code === "full" || code === "not_found") {
+        const joinErrors = ["duplicate_name", "full", "not_found", "invalid"];
+        if (joinErrors.includes(code)) {
           const errEl = document.getElementById("join-error");
           if (errEl) {
-            const msgs = {
-              duplicate_name: "That name is already taken.",
-              full: "Room is full.",
-              not_found: "Room not found.",
-            };
-            errEl.textContent = msgs[code] || message;
+            errEl.textContent = message;
             errEl.style.display = "";
           }
         }
@@ -129,6 +137,7 @@ function main() {
 
   function goHome() {
     currentSession = null;
+    hasReceivedWelcome = false;
     if (ws) { ws.close(); ws = null; }
     history.replaceState(null, "", "/");
     doRender();

@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PIC9UPPER - Admin</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    h1 { color: #00d4ff; margin-bottom: 8px; }
+    .subtitle { color: #888; margin-bottom: 24px; font-size: 14px; }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    input[type="text"] {
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid #444;
+      background: #16213e;
+      color: #e0e0e0;
+      font-size: 14px;
+      width: 200px;
+    }
+    input[type="text"]::placeholder { color: #666; }
+    button {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: none;
+      background: #00d4ff;
+      color: #1a1a2e;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:hover { background: #00b8d9; }
+    button.secondary {
+      background: #333;
+      color: #ccc;
+    }
+    button.secondary:hover { background: #444; }
+
+    .auto-refresh {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #888;
+      font-size: 13px;
+      margin-left: auto;
+    }
+    .auto-refresh input[type="checkbox"] {
+      accent-color: #00d4ff;
+    }
+
+    .status {
+      padding: 8px 14px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+    .status.info { background: #16213e; border: 1px solid #0f3460; }
+    .status.error { background: #3e1616; border: 1px solid #601010; color: #ff6b6b; }
+    .status.ok { background: #163e1e; border: 1px solid #10602a; color: #6bffa0; }
+
+    .panel {
+      background: #16213e;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      border: 1px solid #0f3460;
+    }
+    .panel h2 {
+      font-size: 15px;
+      color: #00d4ff;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .panel h2 .badge {
+      background: #0f3460;
+      color: #00d4ff;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 400;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 8px;
+    }
+    .meta-item {
+      background: #1a1a2e;
+      padding: 8px 12px;
+      border-radius: 6px;
+    }
+    .meta-item .label {
+      font-size: 11px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .meta-item .value {
+      font-size: 14px;
+      margin-top: 2px;
+      font-weight: 500;
+      word-break: break-all;
+    }
+    .phase-badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .phase-LOBBY { background: #2d6a4f; color: #b7e4c7; }
+    .phase-DEAL { background: #5a4b1e; color: #f0d060; }
+    .phase-PLAY { background: #1e3a5a; color: #60b0f0; }
+    .phase-REVEAL { background: #5a1e4b; color: #f060d0; }
+    .phase-VOTE { background: #5a2e1e; color: #f09060; }
+    .phase-RESULT { background: #3a1e5a; color: #b060f0; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th {
+      text-align: left;
+      padding: 6px 10px;
+      color: #888;
+      font-weight: 500;
+      border-bottom: 1px solid #0f3460;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    td {
+      padding: 6px 10px;
+      border-bottom: 1px solid #0f346033;
+    }
+    tr:hover td { background: #1a1a2e44; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover td { background: #0f346066; }
+
+    .connected-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 4px;
+    }
+    .connected-dot.yes { background: #6bffa0; }
+    .connected-dot.no { background: #ff6b6b; }
+
+    .json-toggle {
+      cursor: pointer;
+      color: #00d4ff;
+      font-size: 13px;
+      user-select: none;
+    }
+    .json-toggle:hover { text-decoration: underline; }
+    pre.raw-json {
+      background: #111;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      overflow-x: auto;
+      max-height: 500px;
+      overflow-y: auto;
+      line-height: 1.4;
+    }
+    .hidden { display: none; }
+
+    .back-link {
+      color: #00d4ff;
+      cursor: pointer;
+      font-size: 13px;
+      margin-bottom: 12px;
+      display: inline-block;
+    }
+    .back-link:hover { text-decoration: underline; }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #666;
+    }
+    .empty-state p { margin-top: 8px; }
+
+    .player-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .player-tag {
+      background: #1a1a2e;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .player-tag.host { border: 1px solid #f0d060; color: #f0d060; }
+
+    .time-ago { color: #666; font-size: 12px; }
+
+    button.danger {
+      background: #ff4444;
+      color: #fff;
+      font-size: 12px;
+      padding: 4px 10px;
+    }
+    button.danger:hover { background: #cc3333; }
+  </style>
+</head>
+<body>
+  <h1>PIC9UPPER Admin</h1>
+  <p class="subtitle">Room inspector for debugging reconnection</p>
+
+  <div class="controls">
+    <input type="text" id="roomIdInput" placeholder="Room ID (direct inspect)" />
+    <button onclick="inspectById()">Inspect</button>
+    <button class="secondary" onclick="showRoomList()">All Rooms</button>
+    <div class="auto-refresh">
+      <input type="checkbox" id="autoRefresh" />
+      <label for="autoRefresh">Auto-refresh (3s)</label>
+    </div>
+  </div>
+
+  <div id="statusBar"></div>
+  <div id="content"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let refreshTimer = null;
+    let currentView = "list"; // "list" or "inspect"
+    let currentRoomId = null;
+
+    // Auto-refresh toggle
+    $("autoRefresh").addEventListener("change", () => {
+      if ($("autoRefresh").checked) {
+        refreshTimer = setInterval(refresh, 3000);
+      } else {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+      }
+    });
+
+    $("roomIdInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") inspectById();
+    });
+
+    function refresh() {
+      if (currentView === "list") loadRoomList();
+      else if (currentView === "inspect" && currentRoomId) inspectRoom(currentRoomId);
+    }
+
+    // --- Init ---
+    const params = new URLSearchParams(location.search);
+    if (params.get("roomId")) {
+      $("roomIdInput").value = params.get("roomId");
+      inspectRoom(params.get("roomId"));
+    } else {
+      loadRoomList();
+    }
+
+    // --- Room List ---
+    async function loadRoomList() {
+      currentView = "list";
+      currentRoomId = null;
+
+      // Update URL
+      const url = new URL(location);
+      url.searchParams.delete("roomId");
+      history.replaceState(null, "", url);
+
+      try {
+        const res = await fetch("/api/rooms");
+        const rooms = await res.json();
+
+        if (!rooms.length) {
+          $("statusBar").innerHTML = "";
+          $("content").innerHTML = `
+            <div class="empty-state">
+              <h2>No active rooms</h2>
+              <p>Rooms will appear here once players create or join them.</p>
+            </div>
+          `;
+          return;
+        }
+
+        // Fetch live status for each room in parallel
+        const inspections = await Promise.all(
+          rooms.map(async (room) => {
+            try {
+              const r = await fetch(`/api/room?roomId=${encodeURIComponent(room.roomId)}`);
+              const data = await r.json();
+              return { roomId: room.roomId, playerStatus: data.playerStatus || {} };
+            } catch {
+              return { roomId: room.roomId, playerStatus: {} };
+            }
+          })
+        );
+        const statusByRoom = {};
+        for (const ins of inspections) statusByRoom[ins.roomId] = ins.playerStatus;
+
+        $("statusBar").innerHTML = `<div class="status ok">${rooms.length} active room(s)</div>`;
+        $("content").innerHTML = renderRoomList(rooms, statusByRoom);
+      } catch (err) {
+        $("statusBar").innerHTML = `<div class="status error">Error loading rooms: ${err.message}</div>`;
+        $("content").innerHTML = "";
+      }
+    }
+
+    function renderRoomList(rooms, statusByRoom) {
+      // Sort by updatedAt descending (most recent first)
+      rooms.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+      let html = `
+        <div class="panel">
+          <h2>Active Rooms <span class="badge">${rooms.length}</span></h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Room ID</th>
+                <th>Phase</th>
+                <th>Host</th>
+                <th>Players</th>
+                <th>Last Updated</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+      `;
+
+      for (const room of rooms) {
+        const playerNames = room.playerNames || {};
+        const roomStatus = statusByRoom[room.roomId] || {};
+
+        const playerTags = Object.entries(playerNames).map(([pid, name]) => {
+          const isHost = name === room.hostName;
+          const st = roomStatus[pid];
+          const online = st ? st.online : false;
+          const dotClass = online ? "yes" : "no";
+          return `<span class="player-tag${isHost ? " host" : ""}"><span class="connected-dot ${dotClass}"></span>${esc(name)}</span>`;
+        }).join("");
+
+        const ago = room.updatedAt ? timeAgo(room.updatedAt) : "—";
+
+        html += `
+          <tr class="clickable" onclick="inspectRoom('${esc(room.roomId)}')">
+            <td style="font-family:monospace">${esc(room.roomId)}</td>
+            <td><span class="phase-badge phase-${room.phase || "LOBBY"}">${room.phase || "LOBBY"}</span></td>
+            <td>${esc(room.hostName || "—")}</td>
+            <td><div class="player-tags">${playerTags || "—"}</div></td>
+            <td><span class="time-ago">${ago}</span></td>
+            <td><button class="danger" onclick="destroyRoom('${esc(room.roomId)}', event)">Destroy</button></td>
+          </tr>
+        `;
+      }
+
+      html += `</tbody></table></div>`;
+      return html;
+    }
+
+    function showRoomList() {
+      loadRoomList();
+    }
+
+    // --- Room Inspect ---
+    function inspectById() {
+      const roomId = $("roomIdInput").value.trim();
+      if (!roomId) {
+        $("statusBar").innerHTML = '<div class="status error">Please enter a Room ID</div>';
+        return;
+      }
+      inspectRoom(roomId);
+    }
+
+    async function inspectRoom(roomId) {
+      currentView = "inspect";
+      currentRoomId = roomId;
+      $("roomIdInput").value = roomId;
+
+      // Update URL
+      const url = new URL(location);
+      url.searchParams.set("roomId", roomId);
+      history.replaceState(null, "", url);
+
+      try {
+        const res = await fetch(`/api/room?roomId=${encodeURIComponent(roomId)}`);
+        const data = await res.json();
+
+        if (!data.session) {
+          $("statusBar").innerHTML = '<div class="status info">No active session in this room (empty or expired)</div>';
+          $("content").innerHTML = `<span class="back-link" onclick="showRoomList()">&larr; Back to room list</span>` + renderEmpty(data);
+          return;
+        }
+
+        $("statusBar").innerHTML = `<div class="status ok">Room found — ${data.activeSockets} active socket(s)</div>`;
+        $("content").innerHTML = `<span class="back-link" onclick="showRoomList()">&larr; Back to room list</span>` + renderRoom(data);
+      } catch (err) {
+        $("statusBar").innerHTML = `<div class="status error">Error: ${err.message}</div>`;
+        $("content").innerHTML = `<span class="back-link" onclick="showRoomList()">&larr; Back to room list</span>`;
+      }
+    }
+
+    function renderEmpty(data) {
+      return `
+        <div class="panel">
+          <h2>Connection Info</h2>
+          <div class="meta-grid">
+            <div class="meta-item">
+              <div class="label">Active Sockets</div>
+              <div class="value">${data.activeSockets}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderRoom(data) {
+      const s = data.session;
+      const ps = data.playerStatus || {};
+
+      let html = "";
+
+      // --- Room overview ---
+      html += `
+        <div class="panel">
+          <h2>Room Overview <button class="danger" onclick="destroyRoom('${esc(s.id)}')">Destroy Room</button></h2>
+          <div class="meta-grid">
+            <div class="meta-item">
+              <div class="label">Room ID</div>
+              <div class="value">${esc(s.id)}</div>
+            </div>
+            <div class="meta-item">
+              <div class="label">Phase</div>
+              <div class="value"><span class="phase-badge phase-${s.phase}">${s.phase}</span></div>
+            </div>
+            <div class="meta-item">
+              <div class="label">Players</div>
+              <div class="value">${s.players.length} / ${s.config?.capacity || "?"}</div>
+            </div>
+            <div class="meta-item">
+              <div class="label">Host</div>
+              <div class="value">${esc(s.hostName || "—")}</div>
+            </div>
+            <div class="meta-item">
+              <div class="label">Round</div>
+              <div class="value">${s.roundNumber}</div>
+            </div>
+            <div class="meta-item">
+              <div class="label">Active Sockets</div>
+              <div class="value">${data.activeSockets}</div>
+            </div>
+            <div class="meta-item">
+              <div class="label">Dealer ID</div>
+              <div class="value">${esc(s.dealerId || "—")}</div>
+            </div>
+            <div class="meta-item">
+              <div class="label">Created</div>
+              <div class="value">${s.createdAt ? new Date(s.createdAt).toLocaleString() : "—"}</div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // --- Words ---
+      if (s.words && s.words.correct) {
+        html += `
+          <div class="panel">
+            <h2>Words</h2>
+            <div class="meta-grid">
+              <div class="meta-item">
+                <div class="label">Correct (Civilian)</div>
+                <div class="value">${esc(s.words.correct)}</div>
+              </div>
+              <div class="meta-item">
+                <div class="label">Wrong (Undercover)</div>
+                <div class="value">${esc(s.words.wrong?.join(", ") || "—")}</div>
+              </div>
+              <div class="meta-item">
+                <div class="label">Group Index</div>
+                <div class="value">${s.words.groupIndex}</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // --- Players table ---
+      html += `
+        <div class="panel">
+          <h2>Players <span class="badge">${s.players.length}</span></h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Player ID</th>
+                <th>Role</th>
+                <th>Word</th>
+                <th>Status</th>
+                <th>Ready</th>
+                <th>Card Placed</th>
+                <th>Vote</th>
+              </tr>
+            </thead>
+            <tbody>
+      `;
+
+      for (const pid of s.players) {
+        const name = s.playerNames[pid] || pid;
+        const role = s.roles[pid] || "—";
+        const word = s.assignments[pid] || "—";
+        const st = ps[pid] || {};
+        const online = st.online || false;
+        const statusLabel = st.bot ? "Bot" : (online ? "Online" : (st.socketConnected ? "No pong" : "Offline"));
+        const dotClass = online ? "yes" : "no";
+        const lastPongStr = st.lastPong ? timeAgo(st.lastPong) : "";
+        const ready = s.ready[pid] ? "Yes" : "—";
+        const cardPlaced = s.cardPlaced[pid] ? "Yes" : "—";
+        const vote = s.votes[pid]
+          ? s.votes[pid].map(v => s.playerNames[v] || v).join(", ")
+          : (s.voteSelection[pid]
+            ? "(selecting: " + s.voteSelection[pid].map(v => s.playerNames[v] || v).join(", ") + ")"
+            : "—");
+        const isHost = name === s.hostName;
+        const isDealer = pid === s.dealerId;
+
+        html += `
+          <tr>
+            <td>${esc(name)}${isHost ? " <strong>[HOST]</strong>" : ""}${isDealer ? " <strong>[DEALER]</strong>" : ""}</td>
+            <td style="font-family:monospace;font-size:12px;color:#888">${esc(pid)}</td>
+            <td>${esc(role)}</td>
+            <td>${esc(word)}</td>
+            <td><span class="connected-dot ${dotClass}"></span>${statusLabel}${lastPongStr ? ` <span class="time-ago">(pong ${lastPongStr})</span>` : ""}</td>
+            <td>${ready}</td>
+            <td>${cardPlaced}</td>
+            <td>${esc(vote)}</td>
+          </tr>
+        `;
+      }
+
+      html += `</tbody></table></div>`;
+
+      // --- Scores ---
+      if (s.totalScores && Object.keys(s.totalScores).length > 0) {
+        html += `
+          <div class="panel">
+            <h2>Scores</h2>
+            <table>
+              <thead><tr><th>Player</th><th>Score</th></tr></thead>
+              <tbody>
+        `;
+        const sorted = Object.entries(s.totalScores).sort((a, b) => b[1] - a[1]);
+        for (const [pid, score] of sorted) {
+          html += `<tr><td>${esc(s.playerNames[pid] || pid)}</td><td>${score}</td></tr>`;
+        }
+        html += `</tbody></table></div>`;
+      }
+
+      // --- Config ---
+      html += `
+        <div class="panel">
+          <h2>Config</h2>
+          <div class="meta-grid">
+            <div class="meta-item">
+              <div class="label">Capacity</div>
+              <div class="value">${s.config?.capacity}</div>
+            </div>
+            <div class="meta-item">
+              <div class="label">Dealers</div>
+              <div class="value">${s.config?.dealerCount}</div>
+            </div>
+            <div class="meta-item">
+              <div class="label">Civilians</div>
+              <div class="value">${s.config?.civilianCount}</div>
+            </div>
+            <div class="meta-item">
+              <div class="label">Undercover</div>
+              <div class="value">${s.config?.undercoverCount}</div>
+            </div>
+            <div class="meta-item">
+              <div class="label">Blank</div>
+              <div class="value">${s.config?.blankCount}</div>
+            </div>
+            <div class="meta-item">
+              <div class="label">Dealer Rotation</div>
+              <div class="value">${s.config?.dealerRotation ? "Yes" : "No"}</div>
+            </div>
+            <div class="meta-item">
+              <div class="label">Reveal Countdown</div>
+              <div class="value">${s.config?.revealCountdown}s</div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // --- Raw JSON toggle ---
+      html += `
+        <div class="panel">
+          <h2>
+            <span class="json-toggle" onclick="this.parentElement.parentElement.querySelector('pre').classList.toggle('hidden')">
+              Raw JSON (click to toggle)
+            </span>
+          </h2>
+          <pre class="raw-json hidden">${esc(JSON.stringify(data, null, 2))}</pre>
+        </div>
+      `;
+
+      return html;
+    }
+
+    // --- Destroy room ---
+    async function destroyRoom(roomId, evt) {
+      if (evt) evt.stopPropagation(); // prevent row click from firing
+      if (!confirm(`Destroy room "${roomId}"? This will close all connections and delete all data.`)) return;
+
+      try {
+        const res = await fetch(`/api/room?roomId=${encodeURIComponent(roomId)}`, { method: "DELETE" });
+        const data = await res.json();
+        if (data.ok) {
+          $("statusBar").innerHTML = `<div class="status ok">Room "${roomId}" destroyed</div>`;
+          // Go back to list or refresh current view
+          if (currentView === "inspect") showRoomList();
+          else loadRoomList();
+        } else {
+          $("statusBar").innerHTML = `<div class="status error">Failed to destroy room</div>`;
+        }
+      } catch (err) {
+        $("statusBar").innerHTML = `<div class="status error">Error: ${err.message}</div>`;
+      }
+    }
+
+    // --- Helpers ---
+    function esc(str) {
+      const div = document.createElement("div");
+      div.textContent = String(str);
+      return div.innerHTML;
+    }
+
+    function timeAgo(ts) {
+      const diff = Date.now() - ts;
+      if (diff < 60000) return "just now";
+      if (diff < 3600000) return Math.floor(diff / 60000) + "m ago";
+      if (diff < 86400000) return Math.floor(diff / 3600000) + "h ago";
+      return Math.floor(diff / 86400000) + "d ago";
+    }
+  </script>
+</body>
+</html>

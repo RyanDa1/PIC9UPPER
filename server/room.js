@@ -1,83 +1,222 @@
 /**
- * GameRoom Durable Object — server-authoritative game state.
- * All game logic from the old GameManager lives here.
+ * GameRoom Durable Object — thin orchestrator.
+ * All pure game logic lives in game.js. This file handles:
+ * - WebSocket lifecycle (connect, close, ping/pong)
+ * - DO persistence (session → storage)
+ * - Reconnection (phone-idle revival + name-match takeover)
+ * - Cleanup (10-minute inactivity alarm)
  */
 
 import {
-  Phase, Role, createSession, generateId, isHostPlayer,
-  getDefaultConfig, validateConfig,
-  MIN_PLAYERS, MAX_PLAYERS, DEFAULT_DEALER_VOTES, DEFAULT_PLAYER_VOTES,
+  Phase, createSession, generateId,
+  validateConfig, MAX_PLAYERS,
 } from "./session.js";
 
-import { selectWordGroup, getUndercoverWords } from "./words.js";
+import * as game from "./game.js";
 
-const INACTIVITY_MS = 5 * 60 * 1000; // 5 minutes - cleanup after all connections close
-
-/* ------------------------------------------------------------------ */
-/*  Helper: check if playerId is the host                             */
-/* ------------------------------------------------------------------ */
-function isHost(session, playerId) {
-  if (!session || !session.hostName) return false;
-  const name = session.playerNames?.[playerId];
-  return !!name && name === session.hostName;
-}
-
-function getVoteCount(session, playerId) {
-  // Dealer gets 2 votes, other players get 1
-  const isDealer = playerId === session.dealerId;
-  return isDealer ? 2 : 1;
-}
+const INACTIVITY_MS = 10 * 60 * 1000; // 10 minutes
+const PING_INTERVAL_MS = 3 * 1000;    // 3 seconds (short for dev/debug)
 
 /* ------------------------------------------------------------------ */
-/*  GameRoom Durable Object                                           */
+/*  GameRoom Durable Object                                            */
 /* ------------------------------------------------------------------ */
 export class GameRoom {
   constructor(state, env) {
     this.state = state;
-    this.session = null; // in-memory only (not persisted to DO storage)
+    this.env = env;
+    this.session = null;
+    this.sockets = new Set();
+    this.pingIntervals = new Map(); // ws → intervalId
+
+    // Load persisted session on startup
+    state.blockConcurrencyWhile(async () => {
+      this.session = await state.storage.get("session") || null;
+    });
+  }
+
+  /* ---------- Persistence ---------- */
+
+  persistSession() {
+    if (this.session) {
+      this.state.storage.put("session", this.session);
+      this.notifyRegistry("register");
+    } else {
+      this.state.storage.delete("session");
+      this.notifyRegistry("unregister");
+    }
+  }
+
+  /* ---------- Registry ---------- */
+
+  notifyRegistry(action) {
+    try {
+      const regId = this.env.ROOM_REGISTRY.idFromName("global");
+      const reg = this.env.ROOM_REGISTRY.get(regId);
+      const roomId = this.session?.id || this._lastRoomId || "unknown";
+
+      // Remember roomId for unregister after session is cleared
+      if (this.session?.id) this._lastRoomId = this.session.id;
+
+      if (action === "register" && this.session) {
+        reg.fetch(new Request("https://internal/register", {
+          method: "POST",
+          body: JSON.stringify({
+            roomId,
+            phase: this.session.phase,
+            playerNames: this.session.playerNames,
+            hostName: this.session.hostName,
+          }),
+        }));
+      } else if (action === "unregister") {
+        reg.fetch(new Request("https://internal/unregister", {
+          method: "POST",
+          body: JSON.stringify({ roomId }),
+        }));
+      }
+    } catch (err) {
+      console.error("Registry notify failed:", err);
+    }
+  }
+
+  /* ---------- Ping / Pong ---------- */
+
+  startPing(ws) {
+    const id = setInterval(() => {
+      try {
+        ws.send(JSON.stringify({ type: "ping" }));
+      } catch {
+        // Socket gone — clean up
+        this.stopPing(ws);
+        this.sockets.delete(ws);
+        this.handleClose(ws);
+      }
+    }, PING_INTERVAL_MS);
+    this.pingIntervals.set(ws, id);
+  }
+
+  stopPing(ws) {
+    const id = this.pingIntervals.get(ws);
+    if (id != null) {
+      clearInterval(id);
+      this.pingIntervals.delete(ws);
+    }
+  }
+
+  /* ---------- Close old socket for a player ---------- */
+
+  closeOldSocket(playerId, excludeWs) {
+    for (const sock of this.sockets) {
+      if (sock !== excludeWs && sock._att?.playerId === playerId) {
+        this.stopPing(sock);
+        this.sockets.delete(sock);
+        try { sock.close(1000, "Replaced by new connection"); } catch {}
+      }
+    }
   }
 
   /* ---------- HTTP / WebSocket upgrade ---------- */
 
   async fetch(request) {
+    const url = new URL(request.url);
+
+    // HTTP GET /inspect — return session state as JSON (for admin page)
+    if (url.pathname === "/inspect" && request.method === "GET") {
+      // Build per-player online status
+      const playerStatus = {};
+      if (this.session) {
+        const now = Date.now();
+        for (const pid of this.session.players) {
+          // Bots are always online
+          if (pid.startsWith("bot-")) {
+            playerStatus[pid] = { online: true, bot: true };
+            continue;
+          }
+          // Find the socket for this player
+          let found = false;
+          for (const sock of this.sockets) {
+            if (sock._att?.playerId === pid) {
+              found = true;
+              const lastPong = sock._att.lastPong || 0;
+              const alive = lastPong > 0 && (now - lastPong) < PING_INTERVAL_MS * 3;
+              playerStatus[pid] = { online: alive, lastPong, socketConnected: true };
+              break;
+            }
+          }
+          if (!found) {
+            playerStatus[pid] = { online: false, socketConnected: false };
+          }
+        }
+      }
+
+      return new Response(JSON.stringify({
+        session: this.session,
+        activeSockets: this.sockets.size,
+        socketDetails: [...this.sockets].map(s => ({
+          playerId: s._att?.playerId || null,
+          roomId: s._att?.roomId || null,
+          lastPong: s._att?.lastPong || null,
+        })),
+        playerStatus,
+      }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // POST /destroy — nuke this room completely (admin action)
+    if (url.pathname === "/destroy" && request.method === "POST") {
+      // Close all connected sockets
+      for (const sock of this.sockets) {
+        this.stopPing(sock);
+        try { sock.send(JSON.stringify({ type: "destroyed" })); } catch {}
+        try { sock.close(1000, "Room destroyed by admin"); } catch {}
+      }
+      this.sockets.clear();
+
+      // Unregister from registry before clearing session
+      this.notifyRegistry("unregister");
+
+      // Clear session and storage
+      this.session = null;
+      await this.state.storage.deleteAll();
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("Expected WebSocket", { status: 426 });
     }
 
-    const url = new URL(request.url);
     const roomId = url.searchParams.get("roomId") || "unknown";
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
 
-    // Accept the WebSocket and set up handlers
     server.accept();
-
-    // Store metadata directly on the ws object
     server._att = { playerId: null, roomId };
 
-    // Track connected sockets
-    if (!this.sockets) this.sockets = new Set();
     this.sockets.add(server);
+    this.startPing(server);
 
     server.addEventListener("message", (event) => {
       this.handleMessage(server, event.data);
     });
 
     server.addEventListener("close", () => {
+      this.stopPing(server);
       this.sockets.delete(server);
       this.handleClose(server);
     });
 
     server.addEventListener("error", () => {
+      this.stopPing(server);
       this.sockets.delete(server);
     });
 
-    // If a session already exists, send current state to the new connection
-    // so visitors see the join form (or game state) immediately
-    if (this.session) {
-      this.send(server, { type: "state", session: this.session });
-    }
+    // Always send current state (even null) so client knows immediately
+    // whether this room exists or is empty.
+    this.send(server, { type: "state", session: this.session });
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -88,20 +227,25 @@ export class GameRoom {
     let data;
     try { data = JSON.parse(message); } catch { return this.sendError(ws, "invalid", "Bad JSON"); }
 
+    // Handle pong (keepalive response — track liveness)
+    if (data.type === "pong") {
+      if (ws._att) ws._att.lastPong = Date.now();
+      return;
+    }
+
     const att = ws._att || { playerId: null, roomId: "unknown" };
     const playerId = att.playerId;
-    const roomId = att.roomId;
 
     try {
       switch (data.type) {
-        case "create":   return this.onCreate(ws, att, roomId, data);
-        case "join":     return this.onJoin(ws, att, data);
-        case "rejoin":   return this.onRejoin(ws, att, data);
-        case "leave":    return this.onLeave(ws, att);
-        case "kick":     return this.onKick(ws, playerId, data);
-        case "updateConfig": return this.onUpdateConfig(ws, playerId, data);
-        case "start":    return this.onStart(ws, playerId);
-        case "addBot":   return this.onAddBot(ws, playerId);
+        case "create":         return this.onCreate(ws, att, data);
+        case "join":           return this.onJoin(ws, att, data);
+        case "rejoin":         return this.onRejoin(ws, att, data);
+        case "leave":          return this.onLeave(ws, att);
+        case "kick":           return this.onKick(ws, playerId, data);
+        case "updateConfig":   return this.onUpdateConfig(ws, playerId, data);
+        case "start":          return this.onStart(ws, playerId);
+        case "addBot":         return this.onAddBot(ws, playerId);
         case "acknowledgeDeal": return this.onAcknowledgeDeal(ws, playerId);
         case "placeCard":       return this.onPlaceCard(ws, playerId);
         case "advancePlay":     return this.onAdvancePlay(ws, playerId);
@@ -110,7 +254,7 @@ export class GameRoom {
         case "confirmVote":     return this.onConfirmVote(ws, playerId);
         case "backToLobby":     return this.onBackToLobby(ws, playerId);
         case "startNextRound":  return this.onStartNextRound(ws, playerId);
-        case "nextRound":       return this.onNextRound(ws, playerId); // Legacy, keep for compatibility
+        case "nextRound":       return this.onBackToLobby(ws, playerId); // Legacy
         default: return this.sendError(ws, "unknown", `Unknown action: ${data.type}`);
       }
     } catch (err) {
@@ -124,35 +268,44 @@ export class GameRoom {
   handleClose(ws) {
     const att = ws._att || {};
     if (att.playerId && this.session) {
+      // In LOBBY, leaving a socket means the player leaves
+      // But only if no other socket is connected for this player
       if (this.session.phase === Phase.LOBBY) {
-        this.doLeave(att.playerId);
-        this.broadcast();
+        const hasOtherSocket = [...this.sockets].some(
+          (s) => s._att?.playerId === att.playerId
+        );
+        if (!hasOtherSocket) {
+          this.session = game.doLeave(this.session, att.playerId);
+          this.persistSession();
+          this.broadcast();
+        }
       }
+      // Mid-game: player stays in session, just loses their socket.
+      // They can reconnect via rejoin or name-match takeover.
     }
     this.scheduleCleanup();
   }
 
   async alarm() {
-    // Cleanup when no active connections after timeout
     if (!this.sockets || this.sockets.size === 0) {
       console.log(`Room ${this.session?.id || "unknown"} cleanup: no active connections, clearing session`);
+      this.notifyRegistry("unregister");
       this.session = null;
-      // Clear any persisted storage to free resources
       await this.state.storage.deleteAll();
     } else {
-      // Still have connections, cancel cleanup
       console.log(`Room ${this.session?.id || "unknown"} alarm: ${this.sockets.size} connections still active`);
     }
   }
 
   /* ================================================================ */
-  /*  Action handlers                                                 */
+  /*  Action handlers                                                  */
   /* ================================================================ */
 
-  onCreate(ws, att, roomId, data) {
+  onCreate(ws, att, data) {
     const playerName = (data.playerName || "").trim();
     const capacity = data.capacity || 6;
     const pid = generateId();
+    const roomId = att.roomId;
 
     this.session = createSession(roomId, capacity);
     const name = playerName || `Player ${pid.slice(0, 4)}`;
@@ -163,24 +316,47 @@ export class GameRoom {
     att.playerId = pid;
     ws._att = att;
 
+    this.persistSession();
     this.send(ws, { type: "welcome", playerId: pid, roomId });
     this.broadcast();
   }
 
   onJoin(ws, att, data) {
     if (!this.session) return this.sendError(ws, "not_found", "房间不存在");
-    if (this.session.phase !== Phase.LOBBY) return this.sendError(ws, "invalid", "游戏已开始");
+
+    const playerName = (data.playerName || "").trim();
+    const name = playerName || `Player ${generateId().slice(0, 4)}`;
+
+    // --- Name-match takeover (any phase) ---
+    // If a player with this name already exists, take over their seat
+    const existingEntry = Object.entries(this.session.playerNames)
+      .find(([_, n]) => n.toLowerCase() === name.toLowerCase());
+
+    if (existingEntry) {
+      const [existingId] = existingEntry;
+      if (this.session.players.includes(existingId)) {
+        // Takeover: close old socket, attach new one to existing playerId
+        this.closeOldSocket(existingId, ws);
+        att.playerId = existingId;
+        ws._att = att;
+        this.send(ws, { type: "welcome", playerId: existingId, roomId: this.session.id });
+        this.broadcast();
+        return;
+      }
+    }
+
+    // --- Normal new-player join (LOBBY only) ---
+    if (this.session.phase !== Phase.LOBBY) return this.sendError(ws, "invalid", "该名字不在房间中，无法加入进行中的游戏");
 
     const capacity = this.session.config?.capacity || MAX_PLAYERS;
     if (this.session.players.length >= capacity) return this.sendError(ws, "full", "房间已满");
 
     // Use client-provided playerId if reconnecting, else generate new
     let pid = data.playerId || generateId();
-    const playerName = (data.playerName || "").trim();
-    const name = playerName || `Player ${pid.slice(0, 4)}`;
 
-    // If already in room, just re-attach
+    // If already in room by ID, just re-attach
     if (this.session.players.includes(pid)) {
+      this.closeOldSocket(pid, ws);
       att.playerId = pid;
       ws._att = att;
       this.send(ws, { type: "welcome", playerId: pid, roomId: this.session.id });
@@ -188,9 +364,10 @@ export class GameRoom {
       return;
     }
 
-    // Check duplicate name
-    const existingNames = Object.values(this.session.playerNames || {});
-    if (existingNames.some((n) => n.toLowerCase() === name.toLowerCase())) {
+    // Name already taken was handled above (takeover), so if we get here with
+    // a duplicate name it means the name exists but the player is not in the
+    // players array (shouldn't happen, but guard anyway)
+    if (existingEntry) {
       return this.sendError(ws, "duplicate_name", "该名字已被使用");
     }
 
@@ -200,6 +377,7 @@ export class GameRoom {
     att.playerId = pid;
     ws._att = att;
 
+    this.persistSession();
     this.send(ws, { type: "welcome", playerId: pid, roomId: this.session.id });
     this.broadcast();
   }
@@ -209,15 +387,8 @@ export class GameRoom {
     if (!pid || !this.session) return this.sendError(ws, "not_found", "房间不存在");
     if (!this.session.players.includes(pid)) return this.sendError(ws, "not_found", "玩家不在房间中");
 
-    // Close any old WebSocket for this player
-    if (this.sockets) {
-      for (const sock of this.sockets) {
-        if (sock !== ws && sock._att?.playerId === pid) {
-          this.sockets.delete(sock);
-          try { sock.close(1000, "Replaced by new connection"); } catch {}
-        }
-      }
-    }
+    // Close any old socket for this player
+    this.closeOldSocket(pid, ws);
 
     att.playerId = pid;
     ws._att = att;
@@ -229,7 +400,8 @@ export class GameRoom {
   onLeave(ws, att) {
     if (!att.playerId || !this.session) return;
     if (this.session.phase === Phase.LOBBY) {
-      this.doLeave(att.playerId);
+      this.session = game.doLeave(this.session, att.playerId);
+      this.persistSession();
       this.broadcast();
     }
     ws.close(1000, "Left room");
@@ -237,59 +409,45 @@ export class GameRoom {
 
   onKick(ws, playerId, data) {
     if (!this.session || this.session.phase !== Phase.LOBBY) return this.sendError(ws, "invalid", "只能在大厅中踢人");
-    if (!isHost(this.session, playerId)) return this.sendError(ws, "not_host", "只有房主可以踢人");
+    if (!game.isHost(this.session, playerId)) return this.sendError(ws, "not_host", "只有房主可以踢人");
     const targetId = data.targetId;
     if (!targetId || !this.session.players.includes(targetId)) return;
 
-    // Notify the kicked player
-    if (this.sockets) {
-      for (const sock of this.sockets) {
-        if (sock._att?.playerId === targetId) {
-          this.send(sock, { type: "kicked" });
-          this.sockets.delete(sock);
-          try { sock.close(1000, "Kicked"); } catch {}
-        }
+    // Notify and disconnect the kicked player
+    for (const sock of this.sockets) {
+      if (sock._att?.playerId === targetId) {
+        this.send(sock, { type: "kicked" });
+        this.stopPing(sock);
+        this.sockets.delete(sock);
+        try { sock.close(1000, "Kicked"); } catch {}
       }
     }
 
-    this.doLeave(targetId);
+    this.session = game.doLeave(this.session, targetId);
+    this.persistSession();
     this.broadcast();
   }
 
   onUpdateConfig(ws, playerId, data) {
-    if (!this.session || this.session.phase !== Phase.LOBBY) {
-      return this.sendError(ws, "invalid", "只能在大厅中修改配置");
-    }
-    if (!isHost(this.session, playerId)) {
-      return this.sendError(ws, "not_host", "只有房主可以修改配置");
-    }
+    const result = game.handleUpdateConfig(this.session, playerId, data.config);
+    if (result.error) return this.sendError(ws, result.error.code, result.error.message);
 
-    const newConfig = { ...this.session.config, ...data.config };
-    const validation = validateConfig(newConfig);
-
-    if (!validation.valid) {
-      return this.sendError(ws, "invalid_config", validation.errors.join("; "));
-    }
-
-    // Check capacity change - if reduced below current player count, kick excess
-    if (newConfig.capacity < this.session.players.length) {
-      const toKick = this.session.players.slice(newConfig.capacity);
-      for (const kickId of toKick) {
-        // Notify the kicked player
-        if (this.sockets) {
-          for (const sock of this.sockets) {
-            if (sock._att?.playerId === kickId) {
-              this.send(sock, { type: "kicked", reason: "房间容量已减少" });
-              this.sockets.delete(sock);
-              try { sock.close(1000, "Room capacity reduced"); } catch {}
-            }
+    // Kick excess players if capacity was reduced
+    if (result.kickedIds?.length > 0) {
+      for (const kickId of result.kickedIds) {
+        for (const sock of this.sockets) {
+          if (sock._att?.playerId === kickId) {
+            this.send(sock, { type: "kicked", reason: "房间容量已减少" });
+            this.stopPing(sock);
+            this.sockets.delete(sock);
+            try { sock.close(1000, "Room capacity reduced"); } catch {}
           }
         }
-        this.doLeave(kickId);
       }
     }
 
-    this.session.config = newConfig;
+    this.session = result.session;
+    this.persistSession();
     this.broadcast();
   }
 
@@ -297,442 +455,107 @@ export class GameRoom {
     if (!this.session || this.session.phase !== Phase.LOBBY) {
       return this.sendError(ws, "invalid", "只能在大厅中开始游戏");
     }
-    if (!isHost(this.session, playerId)) {
+    if (!game.isHost(this.session, playerId)) {
       return this.sendError(ws, "not_host", "只有房主可以开始游戏");
     }
 
     const count = this.session.players.length;
     const config = this.session.config;
-
-    // Validate player count matches capacity
     if (count !== config.capacity) {
       return this.sendError(ws, "invalid", `需要 ${config.capacity} 名玩家 (当前: ${count})`);
     }
-
-    // Validate config
     const validation = validateConfig(config);
     if (!validation.valid) {
       return this.sendError(ws, "invalid_config", validation.errors.join("; "));
     }
 
-    this.doStartGame();
+    const result = game.doStartGame(this.session);
+    if (result.error) return this.sendError(ws, result.error.code, result.error.message);
+
+    this.session = result.session;
+    this.persistSession();
     this.broadcast();
   }
 
-  /** Core game start logic - assigns roles, words, and transitions to DEAL phase */
-  doStartGame() {
-    const config = this.session.config;
-
-    // Select word group (avoiding recently used)
-    const wordSelection = selectWordGroup(this.session.usedWordGroups || []);
-
-    // Assign roles
-    const roles = {};
-    const assignments = {};
-    const shuffledPlayers = [...this.session.players].sort(() => Math.random() - 0.5);
-
-    // Get human players (non-bots) for dealer selection
-    const humanPlayers = this.session.players.filter((p) => !p.startsWith("bot-"));
-    const shuffledHumans = [...humanPlayers].sort(() => Math.random() - 0.5);
-
-    // Determine dealer (always a human player, never a bot)
-    let dealerId = null;
-    if (config.dealerCount === 1 && humanPlayers.length > 0) {
-      if (config.dealerRotation && this.session.dealerHistory.length > 0) {
-        // Rotate: pick next human player who hasn't been dealer recently
-        const lastDealer = this.session.dealerHistory[this.session.dealerHistory.length - 1];
-        const lastIdx = humanPlayers.indexOf(lastDealer);
-        if (lastIdx >= 0) {
-          dealerId = humanPlayers[(lastIdx + 1) % humanPlayers.length];
-        } else {
-          dealerId = humanPlayers[0];
-        }
-      } else {
-        // First round or no rotation: random from shuffled humans
-        dealerId = shuffledHumans[0];
-      }
-      roles[dealerId] = Role.DEALER;
-      assignments[dealerId] = null; // Dealer sees nothing
-    }
-
-    // Get non-dealer players for role assignment (shuffled)
-    const nonDealerShuffled = shuffledPlayers.filter((p) => p !== dealerId);
-    let assignIdx = 0;
-
-    // Assign civilians (see correct word)
-    for (let i = 0; i < config.civilianCount; i++) {
-      const pid = nonDealerShuffled[assignIdx++];
-      roles[pid] = Role.CIVILIAN;
-      assignments[pid] = wordSelection.correct;
-    }
-
-    // Assign undercovers (see wrong word)
-    const undercoverWords = getUndercoverWords(
-      wordSelection.wrong,
-      config.undercoverCount,
-      config.differentUndercoverWords
-    );
-    for (let i = 0; i < config.undercoverCount; i++) {
-      const pid = nonDealerShuffled[assignIdx++];
-      roles[pid] = Role.UNDERCOVER;
-      assignments[pid] = undercoverWords[i];
-    }
-
-    // Assign blanks
-    for (let i = 0; i < config.blankCount; i++) {
-      const pid = nonDealerShuffled[assignIdx++];
-      roles[pid] = Role.BLANK;
-      assignments[pid] = "白板";
-    }
-
-    // Update session
-    this.session = {
-      ...this.session,
-      phase: Phase.DEAL,
-      dealerId,
-      words: {
-        correct: wordSelection.correct,
-        wrong: wordSelection.wrong,
-        groupIndex: wordSelection.groupIndex,
-      },
-      usedWordGroups: [...(this.session.usedWordGroups || []), wordSelection.groupIndex],
-      roles,
-      assignments,
-      ready: {},
-      cardPlaced: {},
-      roundNumber: (this.session.roundNumber || 0) + 1,
-      dealerHistory: dealerId
-        ? [...(this.session.dealerHistory || []), dealerId]
-        : this.session.dealerHistory,
-    };
-
-    this.doBotActions();
-  }
-
   onAddBot(ws, playerId) {
-    if (!this.session || this.session.phase !== Phase.LOBBY) return;
-    if (!isHost(this.session, playerId)) return this.sendError(ws, "not_host", "只有房主可以添加测试玩家");
-
-    const capacity = this.session.config?.capacity || MAX_PLAYERS;
-    if (this.session.players.length >= capacity) return;
-
-    const botId = "bot-" + generateId().slice(0, 6);
-    const names = ["小明", "小红", "小华", "小丽", "小强", "小芳", "小军", "小玲"];
-    const usedNames = new Set(Object.values(this.session.playerNames));
-    const name = names.find((n) => !usedNames.has(n)) || `机器人${this.session.players.length}`;
-    this.session.players = [...this.session.players, botId];
-    this.session.playerNames = { ...this.session.playerNames, [botId]: name };
+    const result = game.handleAddBot(this.session, playerId);
+    if (result.error) return this.sendError(ws, result.error.code, result.error.message);
+    this.session = result.session;
+    this.persistSession();
     this.broadcast();
   }
 
   onAcknowledgeDeal(ws, playerId) {
-    if (!this.session || this.session.phase !== Phase.DEAL) return;
-    if (!this.session.players.includes(playerId)) return;
-    this.session.ready = { ...this.session.ready, [playerId]: true };
+    const result = game.handleAcknowledgeDeal(this.session, playerId);
+    if (result.error) return;
+    this.session = result.session;
+    this.persistSession();
     this.broadcast();
   }
 
   onPlaceCard(ws, playerId) {
-    if (!this.session || this.session.phase !== Phase.DEAL) return;
-    if (!this.session.players.includes(playerId)) return;
-
-    const cardPlaced = { ...(this.session.cardPlaced || {}), [playerId]: true };
-
-    // All players except dealer need to place card (if dealer exists)
-    const required = this.session.dealerId
-      ? this.session.players.filter((p) => p !== this.session.dealerId)
-      : this.session.players;
-    const allPlaced = required.every((p) => cardPlaced[p]);
-
-    this.session = {
-      ...this.session,
-      cardPlaced,
-      phase: allPlaced ? Phase.PLAY : this.session.phase,
-    };
+    const result = game.handlePlaceCard(this.session, playerId);
+    if (result.error) return;
+    this.session = result.session;
+    this.persistSession();
     this.broadcast();
   }
 
   onAdvancePlay(ws, playerId) {
-    if (!this.session || this.session.phase !== Phase.PLAY) return;
-    if (playerId !== this.session.dealerId) return this.sendError(ws, "not_dealer", "只有庄家可以继续");
-
-    this.session = {
-      ...this.session,
-      phase: Phase.REVEAL,
-      ready: {},
-      cardPlaced: {},
-      revealStartTime: Date.now(),
-    };
+    const result = game.handleAdvancePlay(this.session, playerId);
+    if (result.error) return this.sendError(ws, result.error.code, result.error.message);
+    this.session = result.session;
+    this.persistSession();
     this.broadcast();
   }
 
   onAdvanceReveal(ws, playerId) {
-    if (!this.session || this.session.phase !== Phase.REVEAL) return;
-    if (playerId !== this.session.dealerId) return this.sendError(ws, "not_dealer", "只有庄家可以继续");
-
-    this.session = {
-      ...this.session,
-      phase: Phase.VOTE,
-      voteSelection: {},
-      votes: {},
-      dealerGuess: null,
-    };
-    this.doBotActions(); // bots auto-vote
+    const result = game.handleAdvanceReveal(this.session, playerId);
+    if (result.error) return this.sendError(ws, result.error.code, result.error.message);
+    this.session = result.session;
+    this.persistSession();
     this.broadcast();
   }
 
   onSelectVote(ws, playerId, data) {
-    if (!this.session || this.session.phase !== Phase.VOTE) return;
-    if (!this.session.players.includes(playerId)) return;
-    const targetId = data.targetId;
-    if (!targetId || !this.session.players.includes(targetId)) return;
-
-    const current = [...(this.session.voteSelection?.[playerId] || [])];
-    const idx = current.indexOf(targetId);
-    const maxVotes = getVoteCount(this.session, playerId);
-
-    if (idx >= 0) {
-      current.splice(idx, 1);
-    } else if (maxVotes === 1) {
-      current.length = 0;
-      current.push(targetId);
-    } else if (current.length < maxVotes) {
-      current.push(targetId);
-    }
-
-    this.session.voteSelection = { ...(this.session.voteSelection || {}), [playerId]: current };
-
+    const result = game.handleSelectVote(this.session, playerId, data.targetId);
+    if (result.error) return;
+    this.session = result.session;
     // Send only to this player (local-only, not broadcast)
     this.send(ws, { type: "state", session: this.session });
   }
 
   onConfirmVote(ws, playerId) {
-    if (!this.session || this.session.phase !== Phase.VOTE) return;
-    if (!this.session.players.includes(playerId)) return;
-    const selections = this.session.voteSelection?.[playerId];
-    if (!selections || selections.length === 0) return;
-    const maxVotes = getVoteCount(this.session, playerId);
-    if (selections.length !== maxVotes) return;
-
-    const votes = { ...this.session.votes, [playerId]: [...selections] };
-    const dealerGuess = playerId === this.session.dealerId
-      ? selections[0]
-      : this.session.dealerGuess;
-
-    const allVoted = this.session.players.every((p) => votes[p] != null);
-
-    this.session = {
-      ...this.session,
-      votes,
-      dealerGuess,
-      phase: allVoted ? Phase.RESULT : this.session.phase,
-    };
+    const result = game.handleConfirmVote(this.session, playerId);
+    if (result.error) return;
+    this.session = result.session;
+    this.persistSession();
     this.broadcast();
   }
 
-  onNextRound(ws, playerId) {
-    // Legacy handler - now redirects to backToLobby for compatibility
-    return this.onBackToLobby(ws, playerId);
-  }
-
   onBackToLobby(ws, playerId) {
-    if (!this.session) return;
-    if (!isHost(this.session, playerId)) return this.sendError(ws, "not_host", "只有房主可以回到大厅");
-
-    // Reset to lobby, preserve config and players, reset round number and scores
-    this.session = {
-      ...createSession(this.session.id, this.session.config.capacity),
-      players: [...this.session.players],
-      playerNames: { ...this.session.playerNames },
-      hostName: this.session.hostName,
-      config: { ...this.session.config },
-      usedWordGroups: [], // Reset word history
-      roundNumber: 0,     // Reset round number
-      dealerHistory: [],  // Reset dealer history
-      totalScores: {},    // Reset cumulative scores
-    };
+    const result = game.handleBackToLobby(this.session, playerId);
+    if (result.error) return this.sendError(ws, result.error.code, result.error.message);
+    this.session = result.session;
+    this.persistSession();
     this.broadcast();
   }
 
   onStartNextRound(ws, playerId) {
-    if (!this.session) return;
-    if (!isHost(this.session, playerId)) return this.sendError(ws, "not_host", "只有房主可以开始下一轮");
-    if (this.session.phase !== Phase.RESULT) return this.sendError(ws, "invalid", "只能在结算界面开始下一轮");
-
-    // Calculate round scores and update total scores
-    const roundScores = this.calculateRoundScores();
-    const totalScores = { ...(this.session.totalScores || {}) };
-    for (const [pid, score] of Object.entries(roundScores)) {
-      totalScores[pid] = (totalScores[pid] || 0) + score;
-    }
-
-    // Preserve round number, word history, dealer history, total scores
-    const preservedData = {
-      usedWordGroups: [...(this.session.usedWordGroups || [])],
-      roundNumber: this.session.roundNumber || 1,
-      dealerHistory: [...(this.session.dealerHistory || [])],
-      totalScores,
-    };
-
-    // Reset session to lobby state first
-    this.session = {
-      ...createSession(this.session.id, this.session.config.capacity),
-      players: [...this.session.players],
-      playerNames: { ...this.session.playerNames },
-      hostName: this.session.hostName,
-      config: { ...this.session.config },
-      usedWordGroups: preservedData.usedWordGroups,
-      roundNumber: preservedData.roundNumber,
-      dealerHistory: preservedData.dealerHistory,
-      totalScores: preservedData.totalScores,
-    };
-
-    // Now directly start the game (reuse onStart logic)
-    this.doStartGame();
+    const result = game.handleStartNextRound(this.session, playerId);
+    if (result.error) return this.sendError(ws, result.error.code, result.error.message);
+    this.session = result.session;
+    this.persistSession();
     this.broadcast();
   }
 
-  /** Calculate scores for the current round based on votes and scoring rules */
-  calculateRoundScores() {
-    const scoring = this.session.config?.scoring || {};
-    const dealerId = this.session.dealerId;
-    const roundScores = {};
-
-    // Initialize scores for all players
-    for (const p of this.session.players) {
-      roundScores[p] = 0;
-    }
-
-    // Process all votes
-    for (const [voterId, picks] of Object.entries(this.session.votes || {})) {
-      if (!Array.isArray(picks)) continue;
-      const voterIsDealer = voterId === dealerId;
-
-      for (const targetId of picks) {
-        const targetRole = this.session.roles?.[targetId];
-
-        if (voterIsDealer) {
-          // Dealer voting
-          if (targetRole === Role.CIVILIAN) {
-            // 庄家投对平民
-            roundScores[voterId] = (roundScores[voterId] || 0) + (scoring.dealerCorrectCivilian || 3);
-            roundScores[targetId] = (roundScores[targetId] || 0) + (scoring.civilianFromDealer || 1);
-          } else if (targetRole === Role.UNDERCOVER) {
-            // 庄家投错卧底
-            roundScores[targetId] = (roundScores[targetId] || 0) + (scoring.undercoverFromDealer || 2);
-          } else if (targetRole === Role.BLANK) {
-            // 庄家投错白板
-            roundScores[targetId] = (roundScores[targetId] || 0) + (scoring.blankFromDealer || 3);
-          }
-        } else {
-          // Non-dealer player voting
-          if (targetRole === Role.CIVILIAN) {
-            // 玩家投对平民
-            roundScores[voterId] = (roundScores[voterId] || 0) + (scoring.playerCorrectCivilian || 1);
-          }
-          // 被其他玩家投票，被投者得分
-          roundScores[targetId] = (roundScores[targetId] || 0) + (scoring.receivedVote || 1);
-        }
-      }
-    }
-
-    return roundScores;
-  }
-
   /* ================================================================ */
-  /*  Internal helpers                                                */
+  /*  Internal helpers                                                 */
   /* ================================================================ */
-
-  /** Auto-complete actions for bot players at phase transitions */
-  doBotActions() {
-    if (!this.session) return;
-    const bots = this.session.players.filter((p) => p.startsWith("bot-"));
-    if (bots.length === 0) return;
-
-    if (this.session.phase === Phase.DEAL) {
-      // Bots auto-acknowledge and place card
-      const ready = { ...this.session.ready };
-      const cardPlaced = { ...(this.session.cardPlaced || {}) };
-      for (const bot of bots) {
-        if (bot !== this.session.dealerId) {
-          ready[bot] = true;
-          cardPlaced[bot] = true;
-        }
-      }
-      // Check if all non-dealer players have placed
-      const required = this.session.dealerId
-        ? this.session.players.filter((p) => p !== this.session.dealerId)
-        : this.session.players;
-      const allPlaced = required.every((p) => cardPlaced[p]);
-      this.session = {
-        ...this.session,
-        ready,
-        cardPlaced,
-        phase: allPlaced ? Phase.PLAY : this.session.phase,
-      };
-    }
-
-    if (this.session.phase === Phase.VOTE) {
-      // Bots auto-vote for a random eligible player
-      const votes = { ...this.session.votes };
-      const voteSelection = { ...(this.session.voteSelection || {}) };
-      for (const bot of bots) {
-        if (votes[bot] != null) continue; // already voted
-        const isDealer = bot === this.session.dealerId;
-        const candidates = isDealer
-          ? this.session.players.filter((p) => p !== this.session.dealerId)
-          : this.session.players.filter((p) => p !== bot && p !== this.session.dealerId);
-        if (candidates.length === 0) continue;
-        const maxVotes = getVoteCount(this.session, bot);
-        // Pick random unique candidates
-        const shuffled = [...candidates].sort(() => Math.random() - 0.5);
-        const picks = shuffled.slice(0, maxVotes);
-        voteSelection[bot] = picks;
-        votes[bot] = picks;
-      }
-      const dealerGuess = this.session.dealerId && votes[this.session.dealerId]
-        ? votes[this.session.dealerId][0]
-        : this.session.dealerGuess;
-      const allVoted = this.session.players.every((p) => votes[p] != null);
-      this.session = {
-        ...this.session,
-        votes,
-        voteSelection,
-        dealerGuess,
-        phase: allVoted ? Phase.RESULT : this.session.phase,
-      };
-    }
-  }
-
-  doLeave(playerId) {
-    if (!this.session) return;
-    const leavingName = this.session.playerNames?.[playerId];
-    const playerNames = { ...this.session.playerNames };
-    delete playerNames[playerId];
-    const remaining = this.session.players.filter((p) => p !== playerId);
-
-    let hostName = this.session.hostName;
-    if (leavingName && leavingName === hostName) {
-      hostName = remaining.length > 0 ? (playerNames[remaining[0]] ?? null) : null;
-    }
-
-    const assignments = { ...this.session.assignments };
-    delete assignments[playerId];
-
-    const roles = { ...this.session.roles };
-    delete roles[playerId];
-
-    this.session = { ...this.session, players: remaining, playerNames, hostName, assignments, roles };
-
-    if (remaining.length === 0) {
-      this.session = null;
-    }
-  }
 
   broadcast() {
     if (!this.session) return;
     const msg = JSON.stringify({ type: "state", session: this.session });
-    if (!this.sockets) return;
     for (const ws of this.sockets) {
       try { ws.send(msg); } catch {}
     }
@@ -747,7 +570,7 @@ export class GameRoom {
   }
 
   scheduleCleanup() {
-    if (!this.sockets || this.sockets.size === 0) {
+    if (this.sockets.size === 0) {
       this.state.storage.setAlarm(Date.now() + INACTIVITY_MS);
     }
   }

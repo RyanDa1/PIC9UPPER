@@ -132,6 +132,8 @@ export function createSession(id = generateId()) {
     revealStartTime: null,
     roundNumber: 0,
     dealerHistory: [],
+    totalScores: {},
+    createdAt: Date.now(),
   };
 }
 

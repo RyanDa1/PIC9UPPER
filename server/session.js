@@ -124,6 +124,10 @@ export function createSession(id = generateId(), capacity = 6) {
     // Dealer rotation support
     roundNumber: 0,
     dealerHistory: [],      // Array of past dealer PlayerIDs
+
+    // Scoring
+    totalScores: {},        // Map<PlayerID, number> - cumulative scores across rounds
+    createdAt: Date.now(),  // Room creation timestamp
   };
 }
 

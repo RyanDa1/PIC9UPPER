@@ -120,7 +120,6 @@ No implicit loops.
 - Image submission
 - AI card generation
 - Persistent score history
-- Reconnect handling
 
 ---
 
@@ -161,3 +160,19 @@ No implicit loops.
 - **RESULT display** — Result cards show total vote counts received. Dealer is visually dimmed and tagged "(dealer)". A legend shows how many votes host vs players had. Dealer's first selection doubles as their guess (`dealerGuess`).
 - **Host-authoritative sync** — After LOBBY, only the host tab broadcasts full `STATE` messages via BroadcastChannel. Non-host tabs send lightweight `ACTION` messages instead. The host merges incoming actions (preserving the authoritative `players` array and its own vote selection) and rebroadcasts. This prevents race conditions where a non-host tab could overwrite the players array.
 - **Local host identity** — Host identity is a local per-tab flag (`sessionStorage`), never synced via BroadcastChannel. Creating a room sets `isHost = true`; joining sets `isHost = false`. This eliminates all sync-related host identity bugs — no shared state can be corrupted by race conditions. `session.hostName` is retained purely for UI display (crown icon). When the host leaves during LOBBY, each remaining tab checks if it's now `players[0]` and self-promotes to host. Production refresh restores host status by comparing the stored player name against `session.hostName` (one-time fallback).
+- **Room logic rewrite (game.js extraction)** — All pure game logic extracted from `room.js` into `server/game.js` as pure functions. Each function receives the current session + action params and returns `{ session }` or `{ error }`. Room.js is now a thin orchestrator handling WebSocket lifecycle, persistence, and ping/pong. Naming: `handle${Action}` for pure functions in game.js, `on${Action}` for DO event handlers in room.js.
+- **DO persistence** — Session is persisted to Durable Object storage after every mutation via fire-and-forget `state.storage.put()`. On DO startup (including after eviction), session is loaded via `blockConcurrencyWhile`. This means game state survives DO idle-eviction — players reconnecting to an evicted DO will find their game intact.
+- **Ping/pong keepalive** — Server sends `{ type: "ping" }` every 30 seconds to each WebSocket. Client responds with `{ type: "pong" }`. If a ping fails to send (socket gone), the server cleans up the dead connection. This detects zombie sockets that would otherwise linger.
+- **Seamless reconnection** — Two reconnection paths for maximum resilience:
+  1. **Phone-idle revival (same tab)**: When a phone screen goes idle, the OS may close the WebSocket. On tab resume, `visibilitychange` fires → sync.js detects the dead socket → immediately reconnects with reset backoff → sends `{ action: "rejoin", playerId }` → server closes any stale socket for that player, re-attaches the new one, and sends fresh state. The player sees their game restored instantly.
+  2. **New-tab takeover (name-match)**: If a player closes their tab and opens a new one, they can rejoin by entering the same room ID and player name. The server's `onJoin` detects the name matches an existing player, closes the old socket, and attaches the new socket to the existing playerId. No new player slot is created — they seamlessly resume their seat mid-game.
+  - Mid-game disconnects no longer remove players from the session. Only LOBBY disconnects (with no remaining socket for that player) trigger removal.
+- **10-minute cleanup** — When all WebSocket connections to a room close, a 10-minute alarm is scheduled. If no connections return before the alarm fires, the session and storage are cleared. This is up from the previous 5-minute timeout.
+- **Lobby advanced settings** — Host sees a "高级设置" (Advanced Settings) button in the config panel. Clicking it reveals:
+  - **Game settings**: "词汇揭露倒计时" (Word reveal countdown, 5-60 seconds)
+  - **Scoring rules**: Six numeric inputs for scoring parameters (dealer/civilian/undercover/blank/vote scores)
+  - Panel state persists across re-renders while in LOBBY phase (toggling it open won't collapse when config inputs change). All settings are included in `config` object sent to server on `change` events.
+- **Reset config button** — Host sees a "恢复默认" (Reset to Default) button next to "游戏设置" (Game Settings) title. Clicking it resets all visible settings to their defaults:
+  - **Basic settings** (always reset): civilian count, undercover count, blank count, dealer rotation, different undercover words
+  - **Advanced settings** (only reset if panel is expanded): reveal countdown, all scoring parameters
+  - Default values match those in `getDefaultConfig()` from session.js (e.g., 2 civilians, capacity-3 undercovers, 0 blanks, 15s countdown, standard scoring rules)
