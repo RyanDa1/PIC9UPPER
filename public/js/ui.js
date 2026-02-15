@@ -22,6 +22,76 @@ let advancedSettingsExpanded = false;
 // Tracks which tab is active in the result screen ('round' or 'leaderboard')
 let resultActiveTab = 'round';
 
+/* ------------------------------------------------------------------ */
+/*  Game Status Bar — round, dealer, phase progress icons              */
+/* ------------------------------------------------------------------ */
+
+const PHASE_ICON_SEQUENCE = ['see', 'thinking', 'chat', 'choose', 'trophy'];
+
+function getActivePhaseIcon(session) {
+  switch (session.phase) {
+    case Phase.DEAL:
+    case Phase.PLAY:
+      return 'see';
+    case Phase.REVEAL: {
+      const countdownSec = session.config?.revealCountdown ?? DEFAULT_REVEAL_COUNTDOWN_SEC;
+      const elapsed = session.revealStartTime
+        ? (Date.now() - session.revealStartTime) / 1000
+        : countdownSec;
+      const remaining = Math.max(0, countdownSec - Math.floor(elapsed));
+      return remaining > 0 ? 'thinking' : 'chat';
+    }
+    case Phase.VOTE:
+      return 'choose';
+    case Phase.RESULT:
+      return 'trophy';
+    default:
+      return null;
+  }
+}
+
+function renderPhaseIcons(activeIcon) {
+  const icons = PHASE_ICON_SEQUENCE;
+  let html = '';
+  for (let i = 0; i < icons.length; i++) {
+    const name = icons[i];
+    const isActive = name === activeIcon;
+    const variant = isActive ? 'dark' : 'light';
+    const sizeClass = isActive ? 'phase-icon active' : 'phase-icon';
+    html += `<img class="${sizeClass}" src="/icons/${name}_${variant}.png" alt="${name}" />`;
+    if (i < icons.length - 1) {
+      const nextActive = icons[i + 1] === activeIcon;
+      const arrowClass = (isActive || nextActive) ? 'phase-arrow spaced' : 'phase-arrow';
+      html += `<img class="${arrowClass}" src="/icons/right-arrow.png" alt="→" />`;
+    }
+  }
+  return html;
+}
+
+function renderGameStatusBar(session) {
+  const roundNum = session.roundNumber || 1;
+  const roundNames = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+  const roundDisplay = roundNum <= 10 ? roundNames[roundNum - 1] : roundNum;
+
+  const dealerName = session.dealerId
+    ? getPlayerName(session, session.dealerId)
+    : null;
+
+  const activeIcon = getActivePhaseIcon(session);
+
+  return `
+    <div class="game-status-bar">
+      <div class="status-info">
+        <span class="round-label">第${roundDisplay}轮</span>
+        ${dealerName ? `<span class="dealer-label">庄家：${escapeHtml(dealerName)}</span>` : ''}
+      </div>
+      <div class="phase-icons">
+        ${renderPhaseIcons(activeIcon)}
+      </div>
+    </div>
+  `;
+}
+
 export function render(session, playerId, sendAction, helpers = {}) {
   const root = document.getElementById("app");
   if (!root) return;
@@ -34,6 +104,7 @@ export function render(session, playerId, sendAction, helpers = {}) {
 
   const assignment = getPlayerAssignment(session, playerId);
   const phase = session.phase;
+  const topBarBg = '<div class="top-bar-bg"></div>';
   const homeBtn = '<button class="btn-home" data-action="go-home" title="返回首页">\u2302</button>';
 
   // Reset local word state when leaving DEAL phase
@@ -63,7 +134,7 @@ export function render(session, playerId, sendAction, helpers = {}) {
   const isInGame = session.players.includes(playerId);
   if (!isInGame) {
     const screenHtml = renderEnterRoom(session, helpers);
-    root.innerHTML = homeBtn + screenHtml;
+    root.innerHTML = topBarBg + homeBtn + screenHtml;
     attachListeners(root, playerId, sendAction, helpers, session);
     return;
   }
@@ -92,7 +163,8 @@ export function render(session, playerId, sendAction, helpers = {}) {
       screenHtml = `<div class="screen"><p>Unknown phase: ${phase}</p></div>`;
   }
 
-  root.innerHTML = homeBtn + screenHtml;
+  const statusBar = phase !== Phase.LOBBY ? renderGameStatusBar(session) : '';
+  root.innerHTML = topBarBg + homeBtn + statusBar + screenHtml;
   attachListeners(root, playerId, sendAction, helpers, session);
 
   // Start countdown timer for REVEAL phase
@@ -730,14 +802,19 @@ function renderResult(session, playerId) {
       scoreDisplay.push(`<span class="score-gain dealer">+${dealerVoteScore}</span>`);
     }
     if (totalExtraScore > 0) {
-      scoreDisplay.push(`<span class="score-gain blank-escape">+${totalExtraScore}</span>`);
+      scoreDisplay.push(`<span class="score-gain escape-badge">逃脱！+${totalExtraScore}</span>`);
     }
 
-    const displayName = r.isYou ? `${escapeHtml(r.name)}（你）` : escapeHtml(r.name);
+    const displayName = escapeHtml(r.name);
+
+    // Inline word for undercover cards when differentUndercoverWords is on
+    const inlineWordHtml = (r.role === Role.UNDERCOVER && config.differentUndercoverWords)
+      ? `<span class="inline-card-word undercover-word">${escapeHtml(r.word)}</span>`
+      : "";
 
     // Normal voters section
     const votersHtml = r.voters.length > 0 ? r.voters.map((v) => `
-      <div class="voter-box-large ${v.isDealer ? "dealer-vote" : ""}">
+      <div class="voter-box-large ${v.isDealer ? "dealer-vote" : ""}${v.voterId === playerId ? " you-vote" : ""}">
         <span class="voter-name">${v.isDealer ? '<span class="crown">👑</span> ' : ""}${escapeHtml(v.voterName)}</span>
         ${v.voterScoreGain > 0 ? `<span class="voter-score player">+${v.voterScoreGain}</span>` : ""}
       </div>
@@ -749,33 +826,35 @@ function renderResult(session, playerId) {
       let blankContent;
       if (r.blankVoters.length > 0) {
         blankContent = r.blankVoters.map((v) => `
-          <div class="voter-box-large blank-vote ${v.isDealer ? "dealer-vote" : ""}">
-            <span class="voter-name">${v.isDealer ? '<span class="crown">👑</span> ' : ""}<span class="blank-flag">\u2691</span>${escapeHtml(v.voterName)}</span>
+          <div class="voter-box-large blank-vote ${v.isDealer ? "dealer-vote" : ""}${v.voterId === playerId ? " you-vote" : ""}">
+            <span class="voter-name">${v.isDealer ? '<span class="crown">👑</span> ' : ""}${escapeHtml(v.voterName)}</span>
             ${v.voterScoreGain > 0 ? `<span class="voter-score player">+${v.voterScoreGain}</span>` : ""}
           </div>
         `).join("");
-      } else if (r.escaped) {
-        blankContent = `<div class="blank-escape-tag"><span class="blank-flag">\u2691</span> 逃脱 <span class="score-gain blank-escape">+${r.escapeScore}</span></div>`;
       } else {
-        blankContent = '<div class="no-votes"><span class="blank-flag">\u2691</span> 无人猜中</div>';
+        blankContent = '<div class="no-votes">无人投白板票</div>';
       }
-      blankVotersHtml = `<div class="result-blank-voters">${blankContent}</div>`;
+      blankVotersHtml = `<div class="result-blank-voters"><div class="votes-column-label">白板票</div>${blankContent}</div>`;
     }
 
-    const cardClass = hasBlankVoting ? "result-card result-card-wide" : "result-card";
+    const youClass = r.isYou ? " you-card" : "";
+    const cardClass = hasBlankVoting ? `result-card result-card-wide${youClass}` : `result-card${youClass}`;
 
     return `
       <div class="${cardClass}">
         <div class="result-header">
-          <span class="player-name">${displayName}</span>
+          <div class="player-name-row">
+            <span class="player-name">${displayName}</span>
+            ${inlineWordHtml}
+          </div>
           <div class="score-badges">
             ${scoreDisplay.join("")}
           </div>
-          <span class="role-badge-small">${r.roleDisplay}</span>
         </div>
-        <div class="result-word">${escapeHtml(r.word)}</div>
+        <div class="card-divider"></div>
         <div class="result-votes-area ${hasBlankVoting ? "split" : ""}">
           <div class="result-voters">
+            ${hasBlankVoting ? '<div class="votes-column-label">正常票</div>' : ""}
             ${votersHtml}
           </div>
           ${blankVotersHtml}
@@ -847,7 +926,7 @@ function renderResult(session, playerId) {
             ${leaderboard.map((entry) => `
               <tr class="${entry.isYou ? "you" : ""}">
                 <td class="col-rank">${entry.rank}</td>
-                <td class="col-name">${entry.isYou ? `${escapeHtml(entry.name)}（你）` : escapeHtml(entry.name)}</td>
+                <td class="col-name">${escapeHtml(entry.name)}</td>
                 <td class="col-round">${entry.roundScore > 0 ? `<span class="round-score">+${entry.roundScore}</span>` : "-"}</td>
                 <td class="col-total">${entry.totalScore}</td>
               </tr>
@@ -867,16 +946,12 @@ function renderResult(session, playerId) {
 
       <div class="result-content">
         <div class="result-tab-panel ${resultActiveTab === 'round' ? 'active' : ''}" data-panel="round">
-          <h2>第${roundDisplay}盘结果揭晓</h2>
-
           <div class="result-groups">
-            ${renderRoleGroup(civilians, "平民")}
-            ${renderRoleGroup(undercovers, "卧底")}
+            ${renderRoleGroup(civilians, `平民 <span class="role-group-word civilian-word">${escapeHtml(session.words.correct)}</span>`)}
+            ${renderRoleGroup(undercovers, (!config.differentUndercoverWords && undercovers.length > 0)
+              ? `卧底 <span class="role-group-word undercover-word">${escapeHtml(undercovers[0].word)}</span>`
+              : "卧底")}
             ${renderRoleGroup(blanks, "白板")}
-          </div>
-
-          <div class="result-summary">
-            <p class="correct-word">正确词: ${escapeHtml(session.words.correct)}</p>
           </div>
         </div>
 

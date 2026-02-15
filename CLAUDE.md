@@ -25,6 +25,7 @@ public/           # Frontend SPA
   js/session.js   # Client-side constants (mirrors server/session.js)
   js/sync.js      # WebSocket client with reconnect
   js/ui.js        # All UI rendering (phase-based)
+  icons/          # Phase indicator icons (*_light.png, *_dark.png, right-arrow.png)
   style.css       # Styles
   index.html      # Entry HTML
   admin.html      # Admin page — room list + inspector (debug tool)
@@ -70,4 +71,6 @@ npm run deploy                 # Deploy to Cloudflare
 - LocalStorage keys: `pic9upper-playerId`, `pic9upper-playerName`
 - Production: sticky playerIds via localStorage, reconnection via rejoin or name-match takeover
 - Blank voting: `config.dealerCanVoteBlank` / `config.playerCanVoteBlank` control whether blank guessing is active. Session carries `blankVoteSelection` (pre-confirm) and `blankVotes` (confirmed) alongside the normal vote maps. Scoring keys: `dealerCorrectBlank`, `playerCorrectBlank`, `blankEscape`. Helper `canVoteBlank(session, playerId)` in game.js determines per-player eligibility.
+- Result screen UI: Cards split into upper (player info) and lower (votes) with divider. Words shown in role group labels (green for civilian, red for undercover). Current player highlighted with indigo border/fill on their card, votes, and leaderboard row. Dealer votes styled same as normal (crown only). Blank escape shown as orange badge in card header.
+- Game status bar: Fixed-position bar at top center (DEAL through RESULT, not LOBBY). Shows round number ("第X轮"), dealer name if applicable, and a 5-icon phase progress indicator (see→thinking→chat→choose→trophy). Active phase uses `*_dark.png` icon at 1.3x size; inactive uses `*_light.png`. All icons use CSS `filter: invert(1)` to appear white on the dark background. The thinking/chat split within REVEAL phase is determined client-side by countdown timer state.
 - Wrangler config: `wrangler.jsonc` — assets served from `public/` with SPA fallback

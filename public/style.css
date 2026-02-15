@@ -6,7 +6,6 @@ body {
   margin: 0;
   min-height: 100vh;
   display: flex;
-  align-items: center;
   justify-content: center;
   font-family: system-ui, -apple-system, sans-serif;
   background: #0f172a;
@@ -18,6 +17,8 @@ main {
   text-align: center;
   padding: 2rem;
   max-width: 480px;
+  margin-top: auto;
+  margin-bottom: auto;
 }
 
 .btn-home {
@@ -32,11 +33,89 @@ main {
   padding: 0.5rem;
   line-height: 1;
   transition: color 0.15s;
-  z-index: 100;
+  z-index: 101;
 }
 
 .btn-home:hover {
   color: #f8fafc;
+}
+
+/* ---- Top bar backdrop — opaque strip behind home btn + status bar ---- */
+.top-bar-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4.5rem;
+  background: linear-gradient(to bottom, #0f172a 75%, transparent);
+  z-index: 98;
+  pointer-events: none;
+}
+
+/* ---- Game Status Bar ---- */
+.game-status-bar {
+  position: fixed;
+  top: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  z-index: 99;
+  pointer-events: none;
+}
+
+.status-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.95rem;
+  color: #cbd5e1;
+}
+
+.round-label {
+  font-weight: 600;
+}
+
+.dealer-label {
+  opacity: 0.8;
+}
+
+.phase-icons {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.phase-icon {
+  width: 28px;
+  height: 28px;
+  opacity: 0.45;
+  filter: invert(1);
+  transition: all 0.2s ease;
+}
+
+.phase-icon.active {
+  width: 36px;
+  height: 36px;
+  opacity: 1;
+}
+
+.phase-arrow {
+  width: 14px;
+  height: 14px;
+  opacity: 0.3;
+  filter: invert(1);
+}
+
+.phase-arrow.spaced {
+  margin: 0 4px;
+}
+
+/* Push screen content below the fixed status bar when it's visible */
+.game-status-bar + .screen {
+  margin-top: 4rem;
 }
 
 .screen {
@@ -727,8 +806,23 @@ main {
 }
 
 .leaderboard-table tr.you td {
-  color: #f8fafc;
+  color: #c7d2fe;
   font-weight: 600;
+  background: rgba(99, 102, 241, 0.12);
+  border-top: 2px solid #818cf8;
+  border-bottom: 2px solid #818cf8;
+}
+
+.leaderboard-table tr.you td:first-child {
+  border-left: 3px solid #818cf8;
+}
+
+.leaderboard-table tr.you td:last-child {
+  border-right: 3px solid #818cf8;
+}
+
+.leaderboard-table tr.you .round-score {
+  color: #a5b4fc;
 }
 
 .leaderboard-table .col-rank {
@@ -768,13 +862,57 @@ main {
 }
 
 .role-group-label {
-  font-size: 0.9rem;
+  font-size: 1.05rem;
   font-weight: 600;
   color: #94a3b8;
   margin-bottom: 0.5rem;
   text-align: left;
   padding-left: 0.5rem;
   border-left: 3px solid #475569;
+}
+
+.role-group-word {
+  display: inline-block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+.role-group-word.civilian-word {
+  color: #10b981;
+  border: 1px solid #10b981;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.role-group-word.undercover-word {
+  color: #ef4444;
+  border: 1px solid #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.player-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.inline-card-word {
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.inline-card-word.undercover-word {
+  color: #ef4444;
+  border: 1px solid #ef4444;
+  background: rgba(239, 68, 68, 0.1);
 }
 
 .role-group-cards {
@@ -803,8 +941,17 @@ main {
 
 .result-header .player-name {
   font-weight: 600;
-  font-size: 0.8rem;
+  font-size: 1.6rem;
   color: #f8fafc;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.card-divider {
+  width: 100%;
+  height: 1px;
+  background: #334155;
+  margin: 0.35rem 0;
 }
 
 .result-header .score-badges {
@@ -858,8 +1005,8 @@ main {
 }
 
 .voter-box-large.dealer-vote {
-  background: rgba(251, 191, 36, 0.15);
-  border: 1px solid #fbbf24;
+  background: transparent;
+  border: 1px solid #334155;
 }
 
 .voter-box-large .voter-score {
@@ -1063,6 +1210,20 @@ main {
   margin-top: 0.35rem;
 }
 
+.result-votes-area.split > .result-voters,
+.result-votes-area.split > .result-blank-voters {
+  align-self: start;
+}
+
+.votes-column-label {
+  font-size: 0.65rem;
+  color: #64748b;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 0.2rem;
+  letter-spacing: 0.05em;
+}
+
 .result-votes-area:not(.split) {
   margin-top: 0;
 }
@@ -1083,8 +1244,8 @@ main {
 }
 
 .voter-box-large.blank-vote.dealer-vote {
-  background: rgba(251, 191, 36, 0.1);
-  border: 1px solid #92711a;
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid #475569;
 }
 
 .blank-flag {
@@ -1107,4 +1268,35 @@ main {
 .score-gain.blank-escape {
   background: rgba(165, 180, 252, 0.2);
   color: #a5b4fc;
+}
+
+.score-gain.escape-badge {
+  background: rgba(251, 146, 60, 0.2);
+  color: #fb923c;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+/* Current player highlighting */
+.result-card {
+  border: 1px solid transparent;
+}
+
+.result-card.you-card {
+  background: rgba(99, 102, 241, 0.15);
+  border: 2px solid #818cf8;
+}
+
+.result-card.you-card .score-gain.escape-badge {
+  background: rgba(245, 158, 11, 0.25);
+  color: #f59e0b;
+}
+
+.voter-box-large.you-vote {
+  background: rgba(99, 102, 241, 0.15);
+  border: 2px solid #818cf8;
+}
+
+.voter-box-large.you-vote .voter-name {
+  color: #c7d2fe;
 }
