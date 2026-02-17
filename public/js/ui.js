@@ -21,6 +21,10 @@ let wordSeenOnce = true;
 let advancedSettingsExpanded = false;
 // Tracks which tab is active in the result screen ('round' or 'leaderboard')
 let resultActiveTab = 'round';
+// Tracks whether the ranking modal is open
+let rankingModalOpen = false;
+// Tracks whether the "keep scores?" confirmation modal is shown
+let showKeepScoresModal = false;
 
 /* ------------------------------------------------------------------ */
 /*  Game Status Bar — round, dealer, phase progress icons              */
@@ -92,12 +96,190 @@ function renderGameStatusBar(session) {
   `;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Ranking Button + Modal                                             */
+/* ------------------------------------------------------------------ */
+
+function renderRankingButton(isOpen) {
+  const variant = isOpen ? 'dark' : 'light';
+  return `
+    <button class="btn-ranking" data-action="toggle-ranking" title="排行榜">
+      <img src="/icons/ranking_${variant}.png" alt="排行榜" />
+    </button>
+  `;
+}
+
+function buildLeaderboardData(session, playerId) {
+  const isResultPhase = session.phase === Phase.RESULT;
+
+  let scores;
+  if (isResultPhase) {
+    // RESULT phase: add current round scores to totals
+    const roundScores = calculateRoundScoresForLeaderboard(session);
+    const prevTotals = session.totalScores || {};
+    scores = {};
+    for (const pid of session.players) {
+      scores[pid] = (prevTotals[pid] || 0) + (roundScores[pid] || 0);
+    }
+  } else {
+    // Other phases: historical totals only
+    scores = session.totalScores || {};
+  }
+
+  const entries = session.players.map(pid => ({
+    id: pid,
+    name: getPlayerName(session, pid),
+    totalScore: scores[pid] || 0,
+    isYou: pid === playerId,
+  }));
+
+  entries.sort((a, b) => b.totalScore - a.totalScore);
+
+  let currentRank = 1;
+  for (let i = 0; i < entries.length; i++) {
+    if (i > 0 && entries[i].totalScore < entries[i - 1].totalScore) {
+      currentRank = i + 1;
+    }
+    entries[i].rank = currentRank;
+  }
+
+  return entries;
+}
+
+/**
+ * Calculate round scores for leaderboard display (RESULT phase only).
+ * Mirrors the scoring logic in renderResult's calculateScoring().
+ */
+function calculateRoundScoresForLeaderboard(session) {
+  const scoring = session.config?.scoring || DEFAULT_SCORING;
+  const dealerId = session.dealerId;
+  const roundScores = {};
+
+  for (const p of session.players) {
+    roundScores[p] = 0;
+  }
+
+  // Process normal votes
+  for (const [voterId, picks] of Object.entries(session.votes || {})) {
+    if (!Array.isArray(picks)) continue;
+    const voterIsDealer = voterId === dealerId;
+
+    for (const targetId of picks) {
+      const targetRole = session.roles?.[targetId];
+      let voterScoreGain = 0;
+      let targetScoreGain = 0;
+
+      if (voterIsDealer) {
+        if (targetRole === Role.CIVILIAN) {
+          voterScoreGain = scoring.dealerCorrectCivilian;
+          targetScoreGain = scoring.civilianFromDealer;
+        } else if (targetRole === Role.UNDERCOVER) {
+          targetScoreGain = scoring.undercoverFromDealer;
+        } else if (targetRole === Role.BLANK) {
+          targetScoreGain = scoring.blankFromDealer;
+        }
+      } else {
+        if (targetRole === Role.CIVILIAN) {
+          voterScoreGain = scoring.playerCorrectCivilian;
+        }
+        targetScoreGain = scoring.receivedVote;
+      }
+
+      roundScores[voterId] = (roundScores[voterId] || 0) + voterScoreGain;
+      roundScores[targetId] = (roundScores[targetId] || 0) + targetScoreGain;
+    }
+  }
+
+  // Process blank votes
+  const blankVotedTargets = new Set();
+  for (const [voterId, targetId] of Object.entries(session.blankVotes || {})) {
+    if (targetId == null) continue;
+    const voterIsDealer = voterId === dealerId;
+    const targetRole = session.roles?.[targetId];
+    let voterScoreGain = 0;
+
+    if (targetRole === Role.BLANK) {
+      blankVotedTargets.add(targetId);
+      voterScoreGain = voterIsDealer
+        ? (scoring.dealerCorrectBlank || 3)
+        : (scoring.playerCorrectBlank || 3);
+    }
+
+    roundScores[voterId] = (roundScores[voterId] || 0) + voterScoreGain;
+  }
+
+  // Blank escape scoring
+  const hasBlankVoting = Object.keys(session.blankVotes || {}).length > 0;
+  if (hasBlankVoting) {
+    for (const p of session.players) {
+      if (session.roles?.[p] === Role.BLANK && !blankVotedTargets.has(p)) {
+        const escapeScore = scoring.blankEscape || 3;
+        roundScores[p] = (roundScores[p] || 0) + escapeScore;
+      }
+    }
+  }
+
+  return roundScores;
+}
+
+function renderRankingModal(session, playerId) {
+  const entries = buildLeaderboardData(session, playerId);
+
+  return `
+    <div class="ranking-overlay" data-action="close-ranking"></div>
+    <div class="ranking-modal">
+      <div class="ranking-modal-header">
+        <h2>排行榜</h2>
+        <button class="ranking-close-btn" data-action="close-ranking">&times;</button>
+      </div>
+      <table class="leaderboard-table">
+        <thead>
+          <tr>
+            <th class="col-rank">排名</th>
+            <th class="col-name">玩家</th>
+            <th class="col-total">总分</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${entries.map(e => `
+            <tr class="${e.isYou ? 'you' : ''}">
+              <td class="col-rank">${e.rank}</td>
+              <td class="col-name">${escapeHtml(e.name)}</td>
+              <td class="col-total">${e.totalScore}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function hasScores(session) {
+  const scores = session?.totalScores || {};
+  return Object.values(scores).some(s => s > 0);
+}
+
+function renderKeepScoresModal() {
+  return `
+    <div class="keep-scores-overlay"></div>
+    <div class="keep-scores-modal">
+      <h3>是否保留当前累计分数？</h3>
+      <p>保留后，分数将带入下一场游戏</p>
+      <div class="keep-scores-actions">
+        <button class="btn secondary" data-action="keep-scores-no">不保留</button>
+        <button class="btn primary" data-action="keep-scores-yes">保留分数</button>
+      </div>
+    </div>
+  `;
+}
+
 export function render(session, playerId, sendAction, helpers = {}) {
   const root = document.getElementById("app");
   if (!root) return;
 
   if (!session) {
     root.innerHTML = renderHome(helpers);
+    root.classList.remove('with-status-bar');
     attachListeners(root, playerId, sendAction, helpers);
     return;
   }
@@ -123,6 +305,16 @@ export function render(session, playerId, sendAction, helpers = {}) {
     resultActiveTab = 'round';
   }
 
+  // Reset ranking modal when entering LOBBY without scores
+  if (phase === Phase.LOBBY && !hasScores(session)) {
+    rankingModalOpen = false;
+  }
+
+  // Reset keep-scores modal when leaving RESULT
+  if (phase !== Phase.RESULT) {
+    showKeepScoresModal = false;
+  }
+
   // Clean up reveal countdown when leaving REVEAL phase
   if (phase !== Phase.REVEAL && revealTimerId) {
     clearInterval(revealTimerId);
@@ -135,6 +327,7 @@ export function render(session, playerId, sendAction, helpers = {}) {
   if (!isInGame) {
     const screenHtml = renderEnterRoom(session, helpers);
     root.innerHTML = topBarBg + homeBtn + screenHtml;
+    root.classList.remove('with-status-bar');
     attachListeners(root, playerId, sendAction, helpers, session);
     return;
   }
@@ -164,7 +357,16 @@ export function render(session, playerId, sendAction, helpers = {}) {
   }
 
   const statusBar = phase !== Phase.LOBBY ? renderGameStatusBar(session) : '';
-  root.innerHTML = topBarBg + homeBtn + statusBar + screenHtml;
+  const showRanking = phase !== Phase.LOBBY || hasScores(session);
+  const rankingBtn = showRanking ? renderRankingButton(rankingModalOpen) : '';
+  const rankingModal = (showRanking && rankingModalOpen) ? renderRankingModal(session, playerId) : '';
+  const keepScoresModal = showKeepScoresModal ? renderKeepScoresModal() : '';
+  root.innerHTML = topBarBg + homeBtn + statusBar + rankingBtn + screenHtml + rankingModal + keepScoresModal;
+
+  // Always add class when in a session (home button + optional status bar present)
+  // This ensures content is not hidden behind the fixed top bar
+  root.classList.add('with-status-bar');
+
   attachListeners(root, playerId, sendAction, helpers, session);
 
   // Start countdown timer for REVEAL phase
@@ -378,6 +580,11 @@ function renderConfigPanel(config) {
           </label>
         </div>
         <div class="scoring-rules">
+          <div class="scoring-rule" style="display: ${config.dealerCount === 1 ? "flex" : "none"};">
+            <label>庄家投票数</label>
+            <input type="number" min="1" max="5" value="${config.dealerVoteCount ?? 2}" data-config="dealerVoteCount" class="scoring-input" />
+            <span>票</span>
+          </div>
           <div class="scoring-rule">
             <label>词汇揭露倒计时</label>
             <input type="number" min="5" max="60" value="${config.revealCountdown ?? 15}" data-config="revealCountdown" class="scoring-input" />
@@ -593,8 +800,7 @@ function renderVote(session, playerId) {
     : session.players.filter((p) => p !== playerId && p !== session.dealerId);
 
   const selections = session.voteSelection?.[playerId] || [];
-  // Dealer gets 2 votes, other players get 1
-  const maxVotes = isDealer ? 2 : 1;
+  const maxVotes = isDealer ? (session.config?.dealerVoteCount ?? 2) : 1;
   const voteReady = selections.length === maxVotes;
 
   const prompt = isDealer
@@ -1196,7 +1402,18 @@ function attachListeners(root, playerId, sendAction, helpers = {}, session = nul
           break;
 
         case "back-to-lobby":
-          sendAction({ type: "backToLobby" });
+          showKeepScoresModal = true;
+          render(session, playerId, sendAction, helpers);
+          break;
+
+        case "keep-scores-yes":
+          showKeepScoresModal = false;
+          sendAction({ type: "backToLobby", keepScores: true });
+          break;
+
+        case "keep-scores-no":
+          showKeepScoresModal = false;
+          sendAction({ type: "backToLobby", keepScores: false });
           break;
 
         case "next-round":
@@ -1213,6 +1430,16 @@ function attachListeners(root, playerId, sendAction, helpers = {}, session = nul
           if (url) navigator.clipboard?.writeText(url);
           break;
         }
+
+        case "toggle-ranking":
+          rankingModalOpen = !rankingModalOpen;
+          render(session, playerId, sendAction, helpers);
+          break;
+
+        case "close-ranking":
+          rankingModalOpen = false;
+          render(session, playerId, sendAction, helpers);
+          break;
 
         case "switch-result-tab": {
           const tab = el.dataset.tab;

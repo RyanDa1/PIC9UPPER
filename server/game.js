@@ -27,7 +27,7 @@ export function isHost(session, playerId) {
 
 export function getVoteCount(session, playerId) {
   const isDealer = session.dealerId && playerId === session.dealerId;
-  return isDealer ? 2 : 1;
+  return isDealer ? (session.config?.dealerVoteCount ?? 2) : 1;
 }
 
 /** Check if a player can vote for blank in this game */
@@ -299,9 +299,18 @@ export function handleConfirmVote(session, playerId) {
 /*  RESULT phase                                                       */
 /* ------------------------------------------------------------------ */
 
-export function handleBackToLobby(session, playerId) {
+export function handleBackToLobby(session, playerId, keepScores = false) {
   if (!session) return { error: { code: "invalid", message: "No session" } };
   if (!isHost(session, playerId)) return { error: { code: "not_host", message: "只有房主可以回到大厅" } };
+
+  let totalScores = {};
+  if (keepScores) {
+    const roundScores = calculateRoundScores(session);
+    const prevTotals = session.totalScores || {};
+    for (const pid of session.players) {
+      totalScores[pid] = (prevTotals[pid] || 0) + (roundScores[pid] || 0);
+    }
+  }
 
   return {
     session: {
@@ -313,7 +322,7 @@ export function handleBackToLobby(session, playerId) {
       usedWordGroups: [],
       roundNumber: 0,
       dealerHistory: [],
-      totalScores: {},
+      totalScores,
     },
   };
 }

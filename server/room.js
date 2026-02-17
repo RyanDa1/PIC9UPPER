@@ -253,9 +253,9 @@ export class GameRoom {
         case "selectVote":      return this.onSelectVote(ws, playerId, data);
         case "selectBlankVote": return this.onSelectBlankVote(ws, playerId, data);
         case "confirmVote":     return this.onConfirmVote(ws, playerId);
-        case "backToLobby":     return this.onBackToLobby(ws, playerId);
+        case "backToLobby":     return this.onBackToLobby(ws, playerId, data);
         case "startNextRound":  return this.onStartNextRound(ws, playerId);
-        case "nextRound":       return this.onBackToLobby(ws, playerId); // Legacy
+        case "nextRound":       return this.onBackToLobby(ws, playerId, data); // Legacy
         default: return this.sendError(ws, "unknown", `Unknown action: ${data.type}`);
       }
     } catch (err) {
@@ -542,8 +542,8 @@ export class GameRoom {
     this.broadcast();
   }
 
-  onBackToLobby(ws, playerId) {
-    const result = game.handleBackToLobby(this.session, playerId);
+  onBackToLobby(ws, playerId, data) {
+    const result = game.handleBackToLobby(this.session, playerId, data?.keepScores);
     if (result.error) return this.sendError(ws, result.error.code, result.error.message);
     this.session = result.session;
     this.persistSession();

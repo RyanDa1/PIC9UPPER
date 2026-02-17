@@ -66,11 +66,12 @@ npm run deploy                 # Deploy to Cloudflare
 
 ## Key Details
 
-- Dealer mode: `config.dealerCount` can be 0 (no dealer, host facilitates phase advancement) or 1 (traditional with dealer). When `dealerCount=0`, `dealerId` is `null` and the host takes over phase-advancement buttons while playing normally with 1 vote.
+- Dealer mode: `config.dealerCount` can be 0 (no dealer, host facilitates phase advancement) or 1 (traditional with dealer). When `dealerCount=0`, `dealerId` is `null` and the host takes over phase-advancement buttons while playing normally with 1 vote. `config.dealerVoteCount` (default 2, range 1–5) controls how many votes the dealer gets; configurable in advanced settings.
 - Word library (`words.txt`): CSV format — `groupId,correctWord,wrong1,wrong2,wrong3,wrong4`
 - LocalStorage keys: `pic9upper-playerId`, `pic9upper-playerName`
 - Production: sticky playerIds via localStorage, reconnection via rejoin or name-match takeover
 - Blank voting: `config.dealerCanVoteBlank` / `config.playerCanVoteBlank` control whether blank guessing is active. Session carries `blankVoteSelection` (pre-confirm) and `blankVotes` (confirmed) alongside the normal vote maps. Scoring keys: `dealerCorrectBlank`, `playerCorrectBlank`, `blankEscape`. Helper `canVoteBlank(session, playerId)` in game.js determines per-player eligibility.
 - Result screen UI: Cards split into upper (player info) and lower (votes) with divider. Words shown in role group labels (green for civilian, red for undercover). Current player highlighted with indigo border/fill on their card, votes, and leaderboard row. Dealer votes styled same as normal (crown only). Blank escape shown as orange badge in card header.
 - Game status bar: Fixed-position bar at top center (DEAL through RESULT, not LOBBY). Shows round number ("第X轮"), dealer name if applicable, and a 5-icon phase progress indicator (see→thinking→chat→choose→trophy). Active phase uses `*_dark.png` icon at 1.3x size; inactive uses `*_light.png`. All icons use CSS `filter: invert(1)` to appear white on the dark background. The thinking/chat split within REVEAL phase is determined client-side by countdown timer state.
+- Keep scores: `handleBackToLobby(session, playerId, keepScores)` — when `keepScores=true`, current round scores are settled via `calculateRoundScores()` and added to `totalScores` before resetting to LOBBY. The ranking button appears in LOBBY when `totalScores` has non-zero values. The keep-scores confirmation modal (`showKeepScoresModal`) is a client-side UI state, not server state.
 - Wrangler config: `wrangler.jsonc` — assets served from `public/` with SPA fallback

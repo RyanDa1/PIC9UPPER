@@ -58,6 +58,7 @@ export function getDefaultConfig(capacity = 6, dealerCount = 1) {
     blankCount,
     dealerRotation: false,
     differentUndercoverWords: false,
+    dealerVoteCount: DEFAULT_DEALER_VOTES,
     dealerCanVoteBlank: false,
     playerCanVoteBlank: false,
     revealCountdown: 15,

@@ -19,6 +19,15 @@ main {
   max-width: 480px;
   margin-top: auto;
   margin-bottom: auto;
+  width: 100%;
+}
+
+/* Add top padding when status bar is present, and align to top instead of center */
+main.with-status-bar {
+  padding-top: 5.5rem;
+  margin-top: 0;
+  margin-bottom: 0;
+  min-height: 100vh;
 }
 
 .btn-home {
@@ -111,11 +120,6 @@ main {
 
 .phase-arrow.spaced {
   margin: 0 4px;
-}
-
-/* Push screen content below the fixed status bar when it's visible */
-.game-status-bar + .screen {
-  margin-top: 4rem;
 }
 
 .screen {
@@ -848,6 +852,135 @@ main {
   font-weight: 500;
 }
 
+/* Ranking Button + Modal */
+.btn-ranking {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 100;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+}
+
+.btn-ranking img {
+  width: 28px;
+  height: 28px;
+  filter: invert(1);
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.btn-ranking:hover img {
+  opacity: 1;
+}
+
+.ranking-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 199;
+}
+
+.ranking-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(90vw, 360px);
+  max-height: 70vh;
+  background: #1e293b;
+  border-radius: 12px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ranking-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem 0.75rem;
+}
+
+.ranking-modal-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #e2e8f0;
+}
+
+.ranking-close-btn {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+
+.ranking-close-btn:hover {
+  color: #e2e8f0;
+}
+
+.ranking-modal .leaderboard-table {
+  border-radius: 0;
+}
+
+.ranking-modal .leaderboard-table tbody {
+  display: block;
+  max-height: calc(70vh - 100px);
+  overflow-y: auto;
+}
+
+.ranking-modal .leaderboard-table thead,
+.ranking-modal .leaderboard-table tbody tr {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+
+/* Keep-scores confirmation modal */
+.keep-scores-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 299;
+}
+
+.keep-scores-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(85vw, 320px);
+  background: #1e293b;
+  border-radius: 16px;
+  padding: 1.5rem;
+  z-index: 300;
+  text-align: center;
+}
+
+.keep-scores-modal h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  color: #e2e8f0;
+}
+
+.keep-scores-modal p {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: #94a3b8;
+}
+
+.keep-scores-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
 /* New result layout styles */
 .result-groups {
   width: 100%;
@@ -989,7 +1122,6 @@ main {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  margin-top: 0.35rem;
 }
 
 .voter-box-large {
@@ -1207,7 +1339,6 @@ main {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.35rem;
-  margin-top: 0.35rem;
 }
 
 .result-votes-area.split > .result-voters,
@@ -1225,7 +1356,7 @@ main {
 }
 
 .result-votes-area:not(.split) {
-  margin-top: 0;
+  margin-top: 0.35rem;
 }
 
 /* Blank voters column */
